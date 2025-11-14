@@ -34,3 +34,19 @@ export const getMimeType = (fileName: string): string | null => {
             return null;
     }
 };
+
+/**
+ * Initiates a file download programmatically.
+ * @param url The URL of the file to download (can be a blob URL or data URL).
+ * @param filename The desired name for the downloaded file.
+ */
+export const downloadFile = (url: string, filename: string) => {
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.target = '_blank';
+  link.rel = 'noopener noreferrer';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+};

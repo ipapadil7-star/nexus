@@ -1,4 +1,9 @@
 
+
+
+
+
+
 import React, { useState, useRef } from 'react';
 import { SendIcon } from './icons/SendIcon';
 import { PaperclipIcon } from './icons/PaperclipIcon';
@@ -13,10 +18,22 @@ interface InputBarProps {
 }
 
 const randomHints = [
-    "Contoh: /gambar rubah steampunk di kota neon",
-    "Contoh: /gambar kucing astronot, gaya lukisan cat minyak",
-    "Contoh: /gambar naga siberpunk --aspect 16:9",
-    "Contoh: /gambar hutan ajaib di malam hari, sinematik",
+    "Contoh: /gambar rubah mekanik --style steampunk",
+    "Contoh: /gambar astronot di mars --style cinematic",
+    "Contoh: /video mobil terbang menembus awan",
+    "Contoh: /gambar kucing astronot --style cartoon",
+    "Contoh: /dengarkan + lampirkan gambar",
+    "Contoh: /gambar kota neon --style cyberpunk",
+    "Contoh: /video robot kuno berjalan di hutan --aspect 9:16",
+    "Contoh: /gambar kastil melayang --style fantasy",
+    "Contoh: /video kota bawah laut --res 1080p",
+    "Contoh: /video balapan di luar angkasa --res 1080p --quality high",
+    "Contoh: /gambar pemandangan fantasi --width 1920 --height 1080",
+    "Contoh: /gambar pahlawan super --style comicbook",
+    "Contoh: /gambar potret lama --style vintage",
+    "Contoh: /gambar sirkuit otak --style darkmode",
+    "Contoh: /gambar pemandangan 8-bit --style pixelart",
+    "Contoh: /gambar kekacauan warna --style abstract",
 ];
 
 export const InputBar: React.FC<InputBarProps> = ({ onSubmit, isLoading }) => {
@@ -85,9 +102,9 @@ export const InputBar: React.FC<InputBarProps> = ({ onSubmit, isLoading }) => {
 
   const placeholderText = attachedFile 
     ? "Tambahkan komentar tentang file... (opsional)" 
-    : "Ketik pesan atau '/gambar' untuk membuat...";
+    : "Ketik pesan atau '/gambar' atau '/video'...";
 
-  const showCommandHint = prompt.trim().toLowerCase() === '/gambar';
+  const showCommandHint = prompt.trim().toLowerCase() === '/gambar' || prompt.trim().toLowerCase() === '/video';
   const isTyping = prompt.length > 0 && !isLoading;
 
   return (
@@ -154,7 +171,7 @@ export const InputBar: React.FC<InputBarProps> = ({ onSubmit, isLoading }) => {
         </div>
         {showCommandHint && (
           <div className="px-3 pt-2 text-xs text-gray-400">
-            <p>Ketik deskripsi gambar... <span className="text-gray-500">{hint}</span></p>
+            <p>Ketik deskripsi... <span className="text-gray-500">{hint}</span></p>
           </div>
         )}
       </div>

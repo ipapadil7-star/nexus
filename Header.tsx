@@ -1,11 +1,10 @@
 
 
-
 import React, { useState } from 'react';
-import { BotIcon } from './icons/BotIcon';
-import { SaveIcon } from './icons/SaveIcon';
-import { CheckIcon } from './icons/CheckIcon';
-import { TrashIcon } from './icons/TrashIcon';
+import { BotIcon } from './components/icons/BotIcon';
+import { SaveIcon } from './components/icons/SaveIcon';
+import { CheckIcon } from './components/icons/CheckIcon';
+import { TrashIcon } from './components/icons/TrashIcon';
 import clsx from 'clsx';
 
 
