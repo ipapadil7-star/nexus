@@ -1,5 +1,3 @@
-
-
 import React from 'react';
 import { ImageIcon } from './ImageIcon';
 import { PaperclipIcon } from './icons/PaperclipIcon';

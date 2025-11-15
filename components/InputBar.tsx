@@ -1,4 +1,3 @@
-
 import React, { useState, useRef } from 'react';
 import { SendIcon } from './icons/SendIcon';
 import { PaperclipIcon } from './icons/PaperclipIcon';
@@ -7,6 +6,8 @@ import { DocumentIcon } from './icons/DocumentIcon';
 import clsx from 'clsx';
 import { AlertIcon } from './icons/AlertIcon';
 import { getMimeType } from '../utils/fileUtils';
+import { allowedImageStyles } from '../services/geminiService';
+
 
 interface InputBarProps {
   onSubmit: (prompt: string, imageFile: File | null) => void;
@@ -17,11 +18,13 @@ const randomHints = [
     "Contoh: /gambar rubah mekanik --style steampunk",
     "Contoh: /gambar astronot di mars --style cinematic",
     "Contoh: /video mobil terbang menembus awan",
+    "Contoh: /placeholder Laporan Kinerja Q3 --theme corporate",
     "Contoh: /gambar kucing astronot --style cartoon",
     "Contoh: /dengarkan + lampirkan gambar",
     "Contoh: /gambar kota neon --style cyberpunk",
     "Contoh: /video robot kuno berjalan di hutan --aspect 9:16",
     "Contoh: /gambar kastil melayang --style fantasy",
+    "Contoh: /placeholder AI Masa Depan --style futuristic --icon brain",
     "Contoh: /video kota bawah laut --res 1080p",
     "Contoh: /video balapan di luar angkasa --quality fast",
     "Contoh: /gambar pemandangan fantasi --width 1920 --height 1080",
@@ -38,6 +41,7 @@ export const InputBar: React.FC<InputBarProps> = ({ onSubmit, isLoading }) => {
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
   const [filePreview, setFilePreview] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [hint] = useState(() => randomHints[Math.floor(Math.random() * randomHints.length)]);
   const [fileError, setFileError] = useState<string | null>(null);
 
@@ -104,11 +108,33 @@ export const InputBar: React.FC<InputBarProps> = ({ onSubmit, isLoading }) => {
       }
   };
 
+  const handleStyleSelect = (style: string) => {
+    let newPrompt = prompt;
+    const styleRegex = /--style\s+(\S+)/;
+
+    if (styleRegex.test(newPrompt)) {
+        newPrompt = newPrompt.replace(styleRegex, `--style ${style}`);
+    } else {
+        const commandPart = "/gambar";
+        const trimmedPrompt = newPrompt.trim();
+        if (trimmedPrompt === commandPart) {
+             newPrompt = `${commandPart} `;
+        }
+        newPrompt = `${newPrompt.trim()} --style ${style} `;
+    }
+    
+    setPrompt(newPrompt);
+    textareaRef.current?.focus();
+  };
+
   const placeholderText = attachedFile 
     ? "Tambahkan komentar tentang file... (opsional)" 
     : "Ketik pesan atau '/gambar' atau '/video'...";
 
   const showCommandHint = prompt.trim().toLowerCase() === '/gambar' || prompt.trim().toLowerCase() === '/video';
+  const showStyleSelector = prompt.trim().toLowerCase().startsWith('/gambar');
+  const currentStyleMatch = prompt.match(/--style\s+(\S+)/);
+  const currentStyle = currentStyleMatch ? currentStyleMatch[1].toLowerCase() : null;
   const isTyping = prompt.length > 0 && !isLoading;
 
   return (
@@ -154,6 +180,28 @@ export const InputBar: React.FC<InputBarProps> = ({ onSubmit, isLoading }) => {
               </button>
           </div>
         )}
+         {showStyleSelector && (
+          <div className="mb-2 animate-fade-in-slide-up">
+              <p className="text-xs text-gray-400 mb-2 px-1">Pilih gaya (opsional):</p>
+              <div className="flex overflow-x-auto space-x-2 pb-2">
+                  {allowedImageStyles.map(style => (
+                      <button 
+                          key={style}
+                          onClick={() => handleStyleSelect(style)}
+                          className={clsx(
+                              "px-3 py-1 text-sm rounded-full border transition-colors whitespace-nowrap",
+                              {
+                                  "bg-purple-600 border-purple-500 text-white": currentStyle === style,
+                                  "bg-gray-700/50 border-gray-600 text-gray-300 hover:bg-gray-600 hover:border-gray-500": currentStyle !== style,
+                              }
+                          )}
+                      >
+                         {style.charAt(0).toUpperCase() + style.slice(1)}
+                      </button>
+                  ))}
+              </div>
+          </div>
+        )}
         <div className="flex items-center gap-2">
           <button
             onClick={() => fileInputRef.current?.click()}
@@ -171,6 +219,7 @@ export const InputBar: React.FC<InputBarProps> = ({ onSubmit, isLoading }) => {
             accept="image/jpeg,image/png,image/webp,image/heic,image/heif,application/pdf"
           />
           <textarea
+            ref={textareaRef}
             value={prompt}
             onChange={(e) => {
               setPrompt(e.target.value);

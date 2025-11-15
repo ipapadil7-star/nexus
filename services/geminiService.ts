@@ -1,6 +1,3 @@
-
-
-
 import { GoogleGenAI, Modality, Part, Chat, GenerateContentResponse } from "@google/genai";
 import { pcmToWavDataUrl } from '../utils/audioUtils';
 
@@ -44,6 +41,7 @@ export const continueChat = async (chat: Chat, prompt: string): Promise<string> 
 
 
 // --- Image Generation ---
+export const allowedImageStyles = ['cinematic', 'photorealistic', 'fantasy', 'anime', 'pixelart', 'cyberpunk', 'steampunk', 'vintage', 'darkmode', 'comicbook', 'abstract', 'cartoon', 'vaporwave'];
 
 /**
  * Parses image generation flags from a prompt string.
@@ -52,7 +50,6 @@ export const continueChat = async (chat: Chat, prompt: string): Promise<string> 
  */
 const parseImageFlags = (prompt: string) => {
     const flags: { [key: string]: string | number } = {};
-    const allowedStyles = ['cinematic', 'photorealistic', 'fantasy', 'anime', 'pixelart', 'cyberpunk', 'steampunk', 'vintage', 'darkmode', 'comicbook', 'abstract', 'cartoon', 'vaporwave'];
     let cleanPrompt = prompt;
 
     const flagRegex = /--(\w+)\s+("([^"]+)"|'([^']+)'|(\S+))/g;
@@ -63,8 +60,8 @@ const parseImageFlags = (prompt: string) => {
         
         switch (key) {
             case 'style':
-                if (!allowedStyles.includes(value.toLowerCase())) {
-                    throw new Error(`Gaya gambar tidak valid. Coba salah satu dari: ${allowedStyles.join(', ')}`);
+                if (!allowedImageStyles.includes(value.toLowerCase())) {
+                    throw new Error(`Gaya gambar tidak valid. Coba salah satu dari: ${allowedImageStyles.join(', ')}`);
                 }
                 flags.style = value;
                 break;
