@@ -1,17 +1,12 @@
 
 
-
-
-
-
-
-
 import React from 'react';
 import { ImageIcon } from './ImageIcon';
 import { PaperclipIcon } from './icons/PaperclipIcon';
 import { BotIcon } from './icons/BotIcon';
 import { VideoIcon } from './icons/VideoIcon';
 import { Volume2Icon } from './icons/Volume2Icon';
+import { TemplateIcon } from './icons/TemplateIcon';
 
 export const WelcomeScreen: React.FC = () => {
   return (
@@ -21,7 +16,7 @@ export const WelcomeScreen: React.FC = () => {
       <p className="mb-8 max-w-lg">
         Hantu di dalam sistem. Tanya apa aja, atau kasih perintah. Gue punya... opini.
       </p>
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 w-full max-w-5xl">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full max-w-5xl">
         <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700/50">
           <h3 className="font-semibold text-gray-200 flex items-center mb-2">
             <PaperclipIcon className="w-5 h-5 mr-2 text-purple-400"/>
@@ -34,16 +29,23 @@ export const WelcomeScreen: React.FC = () => {
             <ImageIcon className="w-5 h-5 mr-2 text-cyan-400"/>
             Buat Gambar
           </h3>
-          <p className="text-sm">Gunakan <code className="bg-gray-700 rounded px-1.5 py-1 text-xs font-mono">/gambar</code>. Tambahkan flag seperti <code className="bg-gray-700 rounded px-1.5 py-1 text-xs font-mono">--style abstract</code>, <code className="bg-gray-700 rounded px-1.5 py-1 text-xs font-mono">--width 1024</code>, atau <code className="bg-gray-700 rounded px-1.5 py-1 text-xs font-mono">--height 768</code>.</p>
+          <p className="text-sm">Gunakan <code className="bg-gray-700 rounded px-1.5 py-1 text-xs font-mono">/gambar</code>. Tambahkan flag seperti <code className="bg-gray-700 rounded px-1.5 py-1 text-xs font-mono">--style vaporwave</code> atau <code className="bg-gray-700 rounded px-1.5 py-1 text-xs font-mono">--aspect 16:9</code>.</p>
         </div>
          <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700/50">
+          <h3 className="font-semibold text-gray-200 flex items-center mb-2">
+            <TemplateIcon className="w-5 h-5 mr-2 text-green-400"/>
+            Gambar Placeholder
+          </h3>
+          <p className="text-sm">Gunakan <code className="bg-gray-700 rounded px-1.5 py-1 text-xs font-mono">/placeholder</code>. Kustomisasi dengan flag seperti <code className="bg-gray-700 rounded px-1.5 py-1 text-xs font-mono">--theme corporate</code> atau <code className="bg-gray-700 rounded px-1.5 py-1 text-xs font-mono">--style retro</code>.</p>
+        </div>
+        <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700/50">
           <h3 className="font-semibold text-gray-200 flex items-center mb-2">
             <VideoIcon className="w-5 h-5 mr-2 text-red-400"/>
             Buat Video
           </h3>
-          <p className="text-sm">Gunakan <code className="bg-gray-700 rounded px-1.5 py-1 text-xs font-mono">/video</code>. Tambahkan flag seperti <code className="bg-gray-700 rounded px-1.5 py-1 text-xs font-mono">--aspect 9:16</code> atau <code className="bg-gray-700 rounded px-1.5 py-1 text-xs font-mono">--res 1080p</code>.</p>
+          <p className="text-sm">Gunakan <code className="bg-gray-700 rounded px-1.5 py-1 text-xs font-mono">/video</code>. Tambahkan flag seperti <code className="bg-gray-700 rounded px-1.5 py-1 text-xs font-mono">--quality fast</code> atau <code className="bg-gray-700 rounded px-1.5 py-1 text-xs font-mono">--res 1080p</code>.</p>
         </div>
-        <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700/50">
+        <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700/50 md:col-span-2">
           <h3 className="font-semibold text-gray-200 flex items-center mb-2">
             <Volume2Icon className="w-5 h-5 mr-2 text-amber-400"/>
             Deskripsi Audio

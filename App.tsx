@@ -10,7 +10,8 @@ import { MessageList } from './components/MessageList';
 import { Header } from './Header';
 import { WelcomeScreen } from './components/WelcomeScreen';
 import { Message, Role, FileInfo } from './types';
-import { generateText, generateImage, startVideoGeneration, pollVideoStatus, generateImageAudioDescription } from './services/geminiService';
+import { generateOneOffText, createChatSession, continueChat, generateImage, startVideoGeneration, pollVideoStatus, generateImageAudioDescription, generatePlaceholderImage } from './services/geminiService';
+import type { Chat } from './services/geminiService';
 import { fileToBase64, getMimeType, downloadFile } from './utils/fileUtils';
 import { ContextMenu } from './components/ContextMenu';
 import { CopyIcon } from './components/icons/CopyIcon';
@@ -98,6 +99,10 @@ const getNexusErrorMessage = (error: unknown): string => {
     if (lowerCaseError.includes('gaya gambar tidak valid')) {
         return `Gaya gambar salah. ${errorMessage.replace('Gaya gambar tidak valid. Coba salah satu dari: ', 'Pilihannya cuma: ')}`;
     }
+    if (lowerCaseError.includes('tema tidak valid') || lowerCaseError.includes('gaya tidak valid') || lowerCaseError.includes('tata letak tidak valid') || lowerCaseError.includes('posisi ikon tidak valid')) { // Placeholder errors
+        const cleanMessage = errorMessage.replace(/ tidak valid\. Pilih dari: /i, ' salah. Pilihannya: ');
+        return `Flag placeholder lo salah. ${cleanMessage}.`;
+    }
     if (lowerCaseError.includes('kualitas gambar tidak valid')) {
         return "Kualitas harus antara 1 dan 4, dasar!";
     }
@@ -108,7 +113,7 @@ const getNexusErrorMessage = (error: unknown): string => {
         return "Resolusi video salah. Pilih '720p' atau '1080p'. Gak ada yang lain.";
     }
     if (lowerCaseError.includes('kualitas video tidak valid')) {
-        return "Kualitas video salah. Pilih 'fast' (standar) atau 'high' (lebih bagus, lebih lama). Simpel kan?";
+        return "Kualitas video salah. Pilih 'high' (standar) atau 'fast' (lebih cepat). Simpel kan?";
     }
 
     // File Handling Errors
@@ -164,6 +169,7 @@ const App: React.FC = () => {
   const [retryConfirmationMessage, setRetryConfirmationMessage] = useState<Message | null>(null);
   const [lastSubmission, setLastSubmission] = useState<{ prompt: string; file: File | null } | null>(null);
   const [showClearConfirmation, setShowClearConfirmation] = useState(false);
+  const [chatSession, setChatSession] = useState<Chat | null>(null);
   
   const pollAndFinalizeVideo = async (msgId: string, operation: any) => {
     try {
@@ -255,178 +261,184 @@ const App: React.FC = () => {
     
     const trimmedPrompt = prompt.trim().toLowerCase();
 
-    // Handle /help command
+    // Handle /help command (stateless, doesn't reset chat)
     if (trimmedPrompt === '/help') {
         addMessage('user', prompt);
-        const helpText = `Dengar, ini bukan ilmu roket. Begini cara kerja gue:\n\n**1. Ngobrol Biasa:**\nKetik apa aja yang ada di otak lo. Gue bakal jawab... mungkin dengan sarkasme.\n\n**2. Bikin Gambar:**\n*   Gunakan perintah \`/gambar\` diikuti deskripsi.\n*   **Contoh:** \`/gambar naga siberpunk di atas kota neon\`\n*   Lo bisa tambahin flag buat ngatur hasil: \`--aspect 16:9\`, \`--width 1024\`, \`--height 768\`, \`--style <gaya>\` (misal: \`cinematic\`, \`pixelart\`, \`fantasy\`, \`cyberpunk\`, \`darkmode\`, \`abstract\`), atau \`--quality 4\`.\n\n**3. Bikin Video:**\n*   Gunakan perintah \`/video\` diikuti deskripsi.\n*   **Penting:** Fitur ini butuh Kunci API khusus. Dialog akan muncul otomatis saat pertama kali digunakan.\n*   **Contoh:** \`/video mobil terbang di kota masa depan\`\n*   Tambahin flag buat kontrol lebih: \`--aspect 9:16\`, \`--res 1080p\`, atau \`--quality high\`.\n\n**4. Deskripsi Audio Gambar:**\n*   Gunakan perintah \`/dengarkan\` dan lampirkan sebuah gambar.\n*   Gue bakal jelasin isi gambarnya lewat suara. Berguna kalau lo males liat.\n\n**5. Analisis & Modifikasi File:**\n*   Klik ikon **penjepit kertas** buat unggah file (gambar atau PDF).\n*   **Unggah gambar:** Kasih perintah buat ngubahnya, atau biarin kosong biar gue yang berimajinasi.\n*   **Unggah PDF:** Gue bakal ringkasin isinya. Gak usah repot-repot baca.\n\nUdah ngerti? Sekarang jangan ganggu gue lagi kecuali ada yang penting.`;
+        const helpText = `Dengar, ini bukan ilmu roket. Begini cara kerja gue:\n\n**1. Ngobrol Biasa:**\nKetik apa aja yang ada di otak lo. Gue bakal jawab... mungkin dengan sarkasme. Gue bakal inget obrolan kita sebelumnya, jadi lo bisa nanya "lanjutkan" atau "jelasin lagi".\n\n**2. Bikin Gambar:**\n*   Gunakan perintah \`/gambar\` diikuti deskripsi.\n*   **Contoh:** \`/gambar naga siberpunk di atas kota neon\`\n*   Lo bisa tambahin flag buat ngatur hasil: \`--aspect 16:9\`, \`--width 1024\`, \`--height 768\`, \`--style <gaya>\` (misal: \`cinematic\`, \`pixelart\`, \`fantasy\`, \`cyberpunk\`, \`darkmode\`, \`abstract\`, \`vaporwave\`), atau \`--quality 4\`.\n\n**3. Bikin Gambar Placeholder:**\n*   Gunakan perintah \`/placeholder\` diikuti judul. Bisa juga kosong untuk latar belakang abstrak.\n*   **Contoh:** \`/placeholder Panduan Komputasi Kuantum\`\n*   Perintah ini sangat canggih. Gunakan flag untuk kustomisasi penuh:\n    *   \`--subtitle "Teks subjudul di sini"\`: Menambahkan subjudul. Pakai tanda kutip jika ada spasi.\n    *   \`--theme <tema>\`: Mengubah palet warna. Pilihan: \`dark\` (default), \`light\`, \`vibrant\`, \`corporate\`, \`nature\`.\n    *   \`--style <gaya>\`: Mengubah gaya visual. Pilihan: \`geometric\` (default), \`organic\`, \`futuristic\`, \`retro\`, \`minimalist\`.\n    *   \`--icon <ikon>\`: Menambahkan ikon abstrak terkait topik (misal: \`--icon code\`).\n    *   \`--layout <posisi>\`: Mengatur posisi teks. Pilihan: \`center\` (default), \`left\`.\n    *   \`--icon-position <posisi>\`: Mengatur posisi ikon. Pilihan: \`left\` (default), \`right\`, \`top\`, \`bottom\`.\n*   **Contoh Lengkap:** \`/placeholder AI Masa Depan --subtitle "Horison Baru" --theme vibrant --style futuristic --icon brain --layout left --icon-position top\`\n\n**4. Bikin Video:**\n*   Gunakan perintah \`/video\` diikuti deskripsi.\n*   **Penting:** Fitur ini butuh Kunci API khusus. Dialog akan muncul otomatis saat pertama kali digunakan.\n*   **Contoh:** \`/video mobil terbang di kota masa depan\`\n*   Kualitas video default adalah 'high'. Gunakan flag \`--quality fast\` untuk hasil yang lebih cepat. Flag lain: \`--aspect 9:16\`, \`--res 1080p\`.\n\n**5. Deskripsi Audio Gambar:**\n*   Gunakan perintah \`/dengarkan\` dan lampirkan sebuah gambar.\n*   Gue bakal jelasin isi gambarnya lewat suara. Berguna kalau lo males liat.\n\n**6. Analisis & Modifikasi File:**\n*   Klik ikon **penjepit kertas** buat unggah file (gambar atau PDF).\n*   **Unggah gambar:** Kasih perintah buat ngubahnya, atau biarin kosong biar gue yang berimajinasi.\n*   **Unggah PDF:** Gue bakal ringkasin isinya. Gak usah repot-repot baca.\n\nUdah ngerti? Sekarang jangan ganggu gue lagi kecuali ada yang penting.`;
         const newMsgId = addMessage('model', helpText);
         setAnimatedMessageId(newMsgId);
         setIsLoading(false);
         return;
     }
 
-    if (trimmedPrompt.startsWith('/video')) {
-        const videoPrompt = prompt.trim().substring(6).trim();
-        if (!videoPrompt) {
-            setError("Perintah `/video` butuh deskripsi, jenius.");
-            setIsLoading(false);
-            return;
-        }
+    const isSlashCommand = trimmedPrompt.startsWith('/');
+    const isContextBreaking = isSlashCommand || !!attachedFile;
 
-        const hasApiKey = await window.aistudio.hasSelectedApiKey();
-        if (!hasApiKey) {
-            try {
-                await window.aistudio.openSelectKey();
-                // Resubmit after key selection. The loading state is still active.
-                handleSubmit(prompt, attachedFile);
-            } catch (e) {
-                setError("Pembuatan video butuh Kunci API. Proses dibatalkan.");
-                setIsLoading(false); // Stop loading if user cancels.
+    // Handle context-breaking, one-off commands
+    if (isContextBreaking) {
+        setChatSession(null); // Reset conversation context
+
+        if (trimmedPrompt.startsWith('/video')) {
+            const videoPrompt = prompt.trim().substring(6).trim();
+            if (!videoPrompt) {
+                setError("Perintah `/video` butuh deskripsi, jenius.");
+                setIsLoading(false);
+                return;
             }
-            return; // Exit this invocation. The recursive one will handle the rest.
-        }
-        
-        setError(null);
 
-        // API Key is confirmed. Now add the user message and start the process.
-        addMessage('user', prompt);
-        
-        const videoMsgId = addMessage('model', undefined, undefined, undefined, 'pending', 'Inisialisasi...');
-        setAnimatedMessageId(videoMsgId);
-
-        try {
-            const operation = await startVideoGeneration(videoPrompt);
+            const hasApiKey = await window.aistudio.hasSelectedApiKey();
+            if (!hasApiKey) {
+                try {
+                    await window.aistudio.openSelectKey();
+                    handleSubmit(prompt, attachedFile); // Resubmit
+                } catch (e) {
+                    setError("Pembuatan video butuh Kunci API. Proses dibatalkan.");
+                    setIsLoading(false);
+                }
+                return;
+            }
             
-            // Save draft to local storage
-            const currentDrafts = JSON.parse(localStorage.getItem('nexus-video-drafts') || '{}');
-            currentDrafts[videoMsgId] = operation;
-            localStorage.setItem('nexus-video-drafts', JSON.stringify(currentDrafts));
-            
-            // Start polling (this runs in the background)
-            pollAndFinalizeVideo(videoMsgId, operation);
-
-        } catch (err) {
-            const nexusErrorMessage = getNexusErrorMessage(err);
-            setError(nexusErrorMessage);
-            setMessages(prev => prev.map(m => 
-                m.id === videoMsgId ? { ...m, generationStatus: 'error', text: nexusErrorMessage } : m
-            ));
-        }
-        setIsLoading(false); // The input is now free, polling happens in the background.
-        return;
-    }
-
-    // Handle /dengarkan command
-    if (trimmedPrompt.startsWith('/dengarkan')) {
-        if (!attachedFile || !attachedFile.type.startsWith('image/')) {
-            const nexusErrorMessage = getNexusErrorMessage(new Error("Perintah /dengarkan butuh gambar."));
-            setError(nexusErrorMessage);
+            addMessage('user', prompt);
+            const videoMsgId = addMessage('model', undefined, undefined, undefined, 'pending', 'Inisialisasi...');
+            setAnimatedMessageId(videoMsgId);
+            try {
+                const operation = await startVideoGeneration(videoPrompt);
+                const currentDrafts = JSON.parse(localStorage.getItem('nexus-video-drafts') || '{}');
+                currentDrafts[videoMsgId] = operation;
+                localStorage.setItem('nexus-video-drafts', JSON.stringify(currentDrafts));
+                pollAndFinalizeVideo(videoMsgId, operation);
+            } catch (err) {
+                const nexusErrorMessage = getNexusErrorMessage(err);
+                setError(nexusErrorMessage);
+                setMessages(prev => prev.map(m => m.id === videoMsgId ? { ...m, generationStatus: 'error', text: nexusErrorMessage } : m));
+            }
             setIsLoading(false);
             return;
         }
-        try {
-            const fileInfo = { name: attachedFile.name, type: attachedFile.type, url: URL.createObjectURL(attachedFile) };
-            addMessage('user', prompt, fileInfo.url, fileInfo);
-            const audioMsgId = addMessage('model', undefined, undefined, undefined, 'pending', 'Menganalisis gambar...');
-            setAnimatedMessageId(audioMsgId);
-            
-            const base64Data = await fileToBase64(attachedFile);
-            const mimeType = attachedFile.type || getMimeType(attachedFile.name);
-            if (!mimeType) throw new Error("Tipe file tidak didukung.");
-            const filePart = { inlineData: { data: base64Data, mimeType } };
 
-            const audioUrl = await generateImageAudioDescription(filePart);
-            setMessages(prev => prev.map(m =>
-                m.id === audioMsgId ? { ...m, generationStatus: 'complete', audioUrl, text: "Ini yang gue lihat:" } : m
-            ));
-
-        } catch (err) {
-             const nexusErrorMessage = getNexusErrorMessage(err);
-             setError(nexusErrorMessage);
-             const newMsgId = addMessage('model', nexusErrorMessage);
-             setAnimatedMessageId(newMsgId);
-        } finally {
-            setIsLoading(false);
+        if (trimmedPrompt.startsWith('/dengarkan')) {
+            if (!attachedFile || !attachedFile.type.startsWith('image/')) {
+                setError(getNexusErrorMessage(new Error("Perintah /dengarkan butuh gambar.")));
+                setIsLoading(false);
+                return;
+            }
+            try {
+                const fileInfo = { name: attachedFile.name, type: attachedFile.type, url: URL.createObjectURL(attachedFile) };
+                addMessage('user', prompt, fileInfo.url, fileInfo);
+                const audioMsgId = addMessage('model', undefined, undefined, undefined, 'pending', 'Menganalisis gambar...');
+                setAnimatedMessageId(audioMsgId);
+                const base64Data = await fileToBase64(attachedFile);
+                const mimeType = attachedFile.type || getMimeType(attachedFile.name);
+                if (!mimeType) throw new Error("Tipe file tidak didukung.");
+                const filePart = { inlineData: { data: base64Data, mimeType } };
+                const audioUrl = await generateImageAudioDescription(filePart);
+                setMessages(prev => prev.map(m => m.id === audioMsgId ? { ...m, generationStatus: 'complete', audioUrl, text: "Ini yang gue lihat:" } : m));
+            } catch (err) {
+                 const nexusErrorMessage = getNexusErrorMessage(err);
+                 setError(nexusErrorMessage);
+                 addMessage('model', nexusErrorMessage);
+            } finally {
+                setIsLoading(false);
+            }
+            return;
         }
-        return;
-    }
 
+        if (trimmedPrompt.startsWith('/gambar')) {
+            if (attachedFile) {
+                setError("Gagal paham. Mau bikin gambar baru dari teks, atau mau ubah gambar yang ada? Kalau mau bikin, pakai `/gambar` aja. Kalau mau ubah, lampirin gambarnya tanpa `/gambar`. Jangan dua-dua-nya.");
+                setIsLoading(false);
+                return;
+            }
+            const imagePrompt = prompt.trim().substring(7).trim();
+            if (!imagePrompt) {
+                setError("Perintah `/gambar` butuh deskripsi, jenius.");
+                setIsLoading(false);
+                return;
+            }
+            addMessage('user', prompt);
+            try {
+                const imageUrl = await generateImage(imagePrompt);
+                const newMsgId = addMessage('model', "Sesuai perintah, bos. Nih gambarnya.", imageUrl);
+                setAnimatedMessageId(newMsgId);
+            } catch (err) {
+                const nexusErrorMessage = getNexusErrorMessage(err);
+                setError(nexusErrorMessage);
+                addMessage('model', nexusErrorMessage);
+            } finally {
+                setIsLoading(false);
+            }
+            return;
+        }
 
-    // Explicitly check for /gambar command first
-    if (trimmedPrompt.startsWith('/gambar')) {
+        if (trimmedPrompt.startsWith('/placeholder')) {
+            addMessage('user', prompt);
+            try {
+                const imageUrl = await generatePlaceholderImage(prompt.trim().substring(12));
+                const newMsgId = addMessage('model', "Nih, placeholder buat artikel lo yang... semoga aja menarik.", imageUrl);
+                setAnimatedMessageId(newMsgId);
+            } catch (err) {
+                const nexusErrorMessage = getNexusErrorMessage(err);
+                setError(nexusErrorMessage);
+                addMessage('model', nexusErrorMessage);
+            } finally {
+                setIsLoading(false);
+            }
+            return;
+        }
+
         if (attachedFile) {
-            setError("Gagal paham. Mau bikin gambar baru dari teks, atau mau ubah gambar yang ada? Kalau mau bikin, pakai `/gambar` aja. Kalau mau ubah, lampirin gambarnya tanpa `/gambar`. Jangan dua-dua-nya.");
-            setIsLoading(false);
+            let userMessageText = prompt;
+            let fileInfo: FileInfo | undefined;
+            try {
+                fileInfo = { name: attachedFile.name, type: attachedFile.type, url: URL.createObjectURL(attachedFile) };
+                const base64Data = await fileToBase64(attachedFile);
+                const mimeType = attachedFile.type || getMimeType(attachedFile.name);
+                if (!mimeType) throw new Error("Tipe file tidak didukung.");
+                const filePart = { inlineData: { data: base64Data, mimeType } };
+                
+                if (!prompt) {
+                     if (attachedFile.type.startsWith('image/')) userMessageText = "Jelaskan gambar ini secara detail. Kalau ada teks, baca juga.";
+                     else userMessageText = `Ringkasin isi dokumen "${attachedFile.name}" ini. Cepat, gue gak punya banyak waktu.`;
+                }
+                
+                addMessage('user', userMessageText, attachedFile.type.startsWith('image/') ? fileInfo.url : undefined, fileInfo);
+
+                if (attachedFile.type.startsWith('image/')) {
+                     const finalImagePrompt = prompt || "Imajinasi ulang gambar ini jadi sesuatu yang gak ngebosenin.";
+                     const imageUrl = await generateImage(finalImagePrompt, filePart);
+                     const responseText = prompt ? "Nih, udah gue ubah sesuai maumu." : "Nih, versi lebih kerennya. Sama-sama.";
+                     const newMsgId = addMessage('model', responseText, imageUrl);
+                     setAnimatedMessageId(newMsgId);
+                } else {
+                    const aiResponse = await generateOneOffText(userMessageText, filePart);
+                    const newMsgId = addMessage('model', aiResponse);
+                    setAnimatedMessageId(newMsgId);
+                }
+            } catch (err) {
+                const nexusErrorMessage = getNexusErrorMessage(err);
+                setError(nexusErrorMessage);
+                addMessage('model', nexusErrorMessage);
+            } finally {
+                setIsLoading(false);
+            }
             return;
         }
-        const imagePrompt = prompt.trim().substring(7).trim();
-        if (!imagePrompt) {
-            setError("Perintah `/gambar` butuh deskripsi, jenius.");
-            setIsLoading(false);
-            return;
-        }
-        addMessage('user', prompt);
-        try {
-            const imageUrl = await generateImage(imagePrompt);
-            const responseText = "Sesuai perintah, bos. Nih gambarnya.";
-            const newMsgId = addMessage('model', responseText, imageUrl);
-            setAnimatedMessageId(newMsgId);
-        } catch (err) {
-            const nexusErrorMessage = getNexusErrorMessage(err);
-            setError(nexusErrorMessage);
-            const newMsgId = addMessage('model', nexusErrorMessage);
-            setAnimatedMessageId(newMsgId);
-        } finally {
-            setIsLoading(false);
-        }
-        return;
     }
 
-    // --- TEXT/ANALYSIS/IMAGE MODIFICATION FLOW ---
-    let userMessageText = prompt;
-    let imageUrlForBubble: string | undefined;
-    let fileInfo: FileInfo | undefined;
-    let filePart: { inlineData: { data: string; mimeType: string } } | undefined;
-
-    if (attachedFile) {
-        try {
-            fileInfo = { name: attachedFile.name, type: attachedFile.type, url: URL.createObjectURL(attachedFile) };
-            if (attachedFile.type.startsWith('image/')) imageUrlForBubble = fileInfo.url;
-            const base64Data = await fileToBase64(attachedFile);
-            const mimeType = attachedFile.type || getMimeType(attachedFile.name);
-            if (!mimeType) throw new Error("Tipe file tidak didukung.");
-            filePart = { inlineData: { data: base64Data, mimeType } };
-        } catch (err) {
-            const nexusErrorMessage = getNexusErrorMessage(err);
-            setError(nexusErrorMessage);
-            setIsLoading(false);
-            return;
-        }
-        if (!prompt) {
-             if (attachedFile.type.startsWith('image/')) userMessageText = "Jelaskan gambar ini secara detail. Kalau ada teks, baca juga.";
-             else userMessageText = `Ringkasin isi dokumen "${attachedFile.name}" ini. Cepat, gue gak punya banyak waktu.`;
-        }
-    }
-    
-    addMessage('user', userMessageText, imageUrlForBubble, fileInfo);
-
+    // --- CONVERSATIONAL TEXT FLOW ---
+    addMessage('user', prompt);
     try {
-        if (attachedFile && attachedFile.type.startsWith('image/')) {
-             const finalImagePrompt = prompt || "Imajinasi ulang gambar ini jadi sesuatu yang gak ngebosenin.";
-             const imageUrl = await generateImage(finalImagePrompt, filePart);
-             const responseText = prompt ? "Nih, udah gue ubah sesuai maumu." : "Nih, versi lebih kerennya. Sama-sama.";
-             const newMsgId = addMessage('model', responseText, imageUrl);
-             setAnimatedMessageId(newMsgId);
-        } else {
-            const aiResponse = await generateText(userMessageText, filePart);
-            const newMsgId = addMessage('model', aiResponse);
-            setAnimatedMessageId(newMsgId);
+        const session = chatSession || createChatSession();
+        if (!chatSession) {
+            setChatSession(session);
         }
+        const aiResponse = await continueChat(session, prompt);
+        const newMsgId = addMessage('model', aiResponse);
+        setAnimatedMessageId(newMsgId);
     } catch (err) {
         const nexusErrorMessage = getNexusErrorMessage(err);
         setError(nexusErrorMessage);
-        const newMsgId = addMessage('model', nexusErrorMessage);
-        setAnimatedMessageId(newMsgId);
+        addMessage('model', nexusErrorMessage);
     } finally {
         setIsLoading(false);
     }
@@ -515,6 +527,7 @@ const App: React.FC = () => {
 
   const handleClearChat = () => {
     setMessages([]);
+    setChatSession(null);
     localStorage.removeItem('nexus-chat-history');
     localStorage.removeItem('nexus-video-drafts');
     setShowClearConfirmation(false);

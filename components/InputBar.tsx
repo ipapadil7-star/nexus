@@ -1,16 +1,12 @@
 
-
-
-
-
-
 import React, { useState, useRef } from 'react';
 import { SendIcon } from './icons/SendIcon';
 import { PaperclipIcon } from './icons/PaperclipIcon';
 import { XIcon } from './icons/XIcon';
 import { DocumentIcon } from './icons/DocumentIcon';
 import clsx from 'clsx';
-import { ConfirmationDialog } from './ConfirmationDialog';
+import { AlertIcon } from './icons/AlertIcon';
+import { getMimeType } from '../utils/fileUtils';
 
 interface InputBarProps {
   onSubmit: (prompt: string, imageFile: File | null) => void;
@@ -27,13 +23,14 @@ const randomHints = [
     "Contoh: /video robot kuno berjalan di hutan --aspect 9:16",
     "Contoh: /gambar kastil melayang --style fantasy",
     "Contoh: /video kota bawah laut --res 1080p",
-    "Contoh: /video balapan di luar angkasa --res 1080p --quality high",
+    "Contoh: /video balapan di luar angkasa --quality fast",
     "Contoh: /gambar pemandangan fantasi --width 1920 --height 1080",
     "Contoh: /gambar pahlawan super --style comicbook",
     "Contoh: /gambar potret lama --style vintage",
     "Contoh: /gambar sirkuit otak --style darkmode",
     "Contoh: /gambar pemandangan 8-bit --style pixelart",
     "Contoh: /gambar kekacauan warna --style abstract",
+    "Contoh: /gambar patung romawi di pantai --style vaporwave",
 ];
 
 export const InputBar: React.FC<InputBarProps> = ({ onSubmit, isLoading }) => {
@@ -42,31 +39,50 @@ export const InputBar: React.FC<InputBarProps> = ({ onSubmit, isLoading }) => {
   const [filePreview, setFilePreview] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [hint] = useState(() => randomHints[Math.floor(Math.random() * randomHints.length)]);
-  const [fileForConfirmation, setFileForConfirmation] = useState<File | null>(null);
+  const [fileError, setFileError] = useState<string | null>(null);
 
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setFileError(null);
     const file = event.target.files?.[0];
     if (file) {
-      if (!file.type.startsWith('image/') && file.type !== 'application/pdf') {
-        setFileForConfirmation(file);
-        if (event.target) event.target.value = ''; // Reset input
+      const MAX_FILE_SIZE_MB = 20;
+      const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
+
+      if (file.size > MAX_FILE_SIZE_BYTES) {
+        const fileSizeMB = (file.size / 1024 / 1024).toFixed(1);
+        setFileError(`File lo kegedean (${fileSizeMB}MB). Batas maksimalnya ${MAX_FILE_SIZE_MB}MB. Cari yang lebih kecil.`);
+        if (fileInputRef.current) fileInputRef.current.value = "";
         return;
       }
+
+      const mimeType = getMimeType(file.name);
+      const supportedMimeTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif', 'application/pdf'];
+      
+      if (!mimeType || !supportedMimeTypes.includes(mimeType)) {
+           setFileError(`Tipe file tidak didukung. Gue cuma nerima: JPG, PNG, WEBP, HEIC, dan PDF. Jangan coba-coba yang lain.`);
+           if (fileInputRef.current) fileInputRef.current.value = "";
+           return;
+      }
+      
       setAttachedFile(file);
-      if (file.type.startsWith('image/')) {
+      if (mimeType.startsWith('image/')) {
         const reader = new FileReader();
         reader.onloadend = () => {
           setFilePreview(reader.result as string);
         };
         reader.readAsDataURL(file);
-      } else {
+      } else { // PDF
         setFilePreview(file.name);
       }
+    }
+     if (event.target) {
+        event.target.value = '';
     }
   };
 
   const removeFile = () => {
+    setFileError(null);
     setAttachedFile(null);
     setFilePreview(null);
     if(fileInputRef.current) {
@@ -88,18 +104,6 @@ export const InputBar: React.FC<InputBarProps> = ({ onSubmit, isLoading }) => {
       }
   };
 
-  const handleConfirmFileUpload = () => {
-    if (fileForConfirmation) {
-        setAttachedFile(fileForConfirmation);
-        setFilePreview(fileForConfirmation.name);
-        setFileForConfirmation(null);
-    }
-  };
-
-  const handleCancelFileUpload = () => {
-    setFileForConfirmation(null);
-  };
-
   const placeholderText = attachedFile 
     ? "Tambahkan komentar tentang file... (opsional)" 
     : "Ketik pesan atau '/gambar' atau '/video'...";
@@ -113,6 +117,21 @@ export const InputBar: React.FC<InputBarProps> = ({ onSubmit, isLoading }) => {
           "bg-gray-800 rounded-2xl p-2.5 shadow-2xl border border-gray-700/50 transition-all duration-300",
           { 'animate-pulse-border': isTyping }
         )}>
+        {fileError && (
+          <div className="mb-2 bg-red-900/40 border border-red-500/50 rounded-lg p-2 flex items-center justify-between animate-fade-in">
+              <div className="flex items-center min-w-0">
+                  <AlertIcon className="w-5 h-5 text-red-400 shrink-0"/>
+                  <p className="text-red-300 text-sm ml-3 truncate" title={fileError}>{fileError}</p>
+              </div>
+              <button
+                  onClick={() => setFileError(null)}
+                  className="p-1 text-gray-400 hover:text-white hover:bg-white/10 rounded-full transition-colors shrink-0 ml-2"
+                  aria-label="Tutup"
+              >
+                  <XIcon className="w-4 h-4" />
+              </button>
+          </div>
+        )}
         {filePreview && (
           <div 
               className="relative inline-block mb-2 rounded-lg overflow-hidden border border-gray-600 transition-transform duration-200 ease-in-out hover:scale-105"
@@ -149,11 +168,14 @@ export const InputBar: React.FC<InputBarProps> = ({ onSubmit, isLoading }) => {
             ref={fileInputRef}
             onChange={handleFileChange}
             className="hidden"
-            accept="*/*"
+            accept="image/jpeg,image/png,image/webp,image/heic,image/heif,application/pdf"
           />
           <textarea
             value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
+            onChange={(e) => {
+              setPrompt(e.target.value);
+              if (fileError) setFileError(null);
+            }}
             onKeyDown={handleKeyDown}
             placeholder={placeholderText}
             className="w-full bg-transparent resize-none focus:outline-none text-gray-200 placeholder-gray-500 max-h-32"
@@ -175,16 +197,6 @@ export const InputBar: React.FC<InputBarProps> = ({ onSubmit, isLoading }) => {
           </div>
         )}
       </div>
-      {fileForConfirmation && (
-        <ConfirmationDialog
-            title="Konfirmasi Tipe File"
-            message={`Tipe file "${fileForConfirmation.name}" tidak umum. Nexus mungkin tidak bisa membacanya dengan benar. Tetap lanjutkan?`}
-            onConfirm={handleConfirmFileUpload}
-            onCancel={handleCancelFileUpload}
-            confirmLabel="Ya, Proses Saja"
-            cancelLabel="Batal"
-        />
-      )}
     </>
   );
 };
