@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Nexus AI</title>
+    <title>AKBAR AI</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
       @keyframes glow-in {
@@ -66,6 +66,16 @@
         background-size: 200% auto;
         animation: background-pan 10s linear infinite;
       }
+      @keyframes blink-caret {
+        from, to { border-color: transparent }
+        50% { border-color: #a855f7; } /* purple-500 */
+      }
+      .typing-cursor::after {
+        content: '_';
+        font-weight: bold;
+        animation: blink-caret 1.2s step-end infinite;
+        margin-left: 0.25rem;
+      }
       /* Custom scrollbar for style selector */
       .overflow-x-auto::-webkit-scrollbar {
         height: 4px;
@@ -88,7 +98,11 @@
     "@google/genai": "https://aistudiocdn.com/@google/genai@^1.29.1",
     "react/": "https://aistudiocdn.com/react@^19.2.0/",
     "react": "https://aistudiocdn.com/react@^19.2.0",
-    "clsx": "https://aistudiocdn.com/clsx@^2.1.1"
+    "clsx": "https://aistudiocdn.com/clsx@^2.1.1",
+    "jspdf": "https://aistudiocdn.com/jspdf@^2.5.1",
+    "jspdf-autotable": "https://aistudiocdn.com/jspdf-autotable@^3.8.2",
+    "pptxgenjs": "https://aistudiocdn.com/pptxgenjs@^3.12.0",
+    "xlsx": "https://aistudiocdn.com/xlsx@^0.18.5"
   }
 }
 </script>

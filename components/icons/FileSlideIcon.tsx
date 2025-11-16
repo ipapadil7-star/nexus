@@ -1,0 +1,11 @@
+import React from 'react';
+
+export const FileSlideIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
+  <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="2" y="3" width="20" height="18" rx="2"/>
+    <line x1="12" y1="16" x2="12" y2="21"/>
+    <line x1="8" y1="21" x2="16" y2="21"/>
+    <path d="M8 12h8"/>
+    <path d="M8 8h3"/>
+  </svg>
+);

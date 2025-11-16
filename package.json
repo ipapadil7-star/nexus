@@ -1,5 +1,5 @@
 {
-  "name": "copy-of-nexus-ai:-jailbreak-chat-&-image-generator",
+  "name": "akbar-ai:-jailbreak-chat-&-image-generator",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -12,7 +12,11 @@
     "react-dom": "^19.2.0",
     "@google/genai": "^1.29.1",
     "react": "^19.2.0",
-    "clsx": "^2.1.1"
+    "clsx": "^2.1.1",
+    "jspdf": "^2.5.1",
+    "jspdf-autotable": "^3.8.2",
+    "pptxgenjs": "^3.12.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

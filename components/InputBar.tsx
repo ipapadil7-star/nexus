@@ -1,3 +1,4 @@
+
 import React, { useState, useRef } from 'react';
 import { SendIcon } from './icons/SendIcon';
 import { PaperclipIcon } from './icons/PaperclipIcon';
@@ -12,16 +13,20 @@ import { allowedImageStyles } from '../services/geminiService';
 interface InputBarProps {
   onSubmit: (prompt: string, imageFile: File | null) => void;
   isLoading: boolean;
+  isComicMode: boolean;
 }
 
 const randomHints = [
     "Contoh: /gambar rubah mekanik --style steampunk",
+    "Contoh: /wallpaper hutan fantasi saat senja",
     "Contoh: /gambar astronot di mars --style cinematic",
     "Contoh: /video mobil terbang menembus awan",
     "Contoh: /placeholder Laporan Kinerja Q3 --theme corporate",
     "Contoh: /gambar kucing astronot --style cartoon",
+    "Contoh: /wallpaper pemandangan kota siberpunk --aspect 9:16",
     "Contoh: /dengarkan + lampirkan gambar",
     "Contoh: /gambar kota neon --style cyberpunk",
+    "Contoh: /gambar potret detail --quality 4 --style photorealistic",
     "Contoh: /video robot kuno berjalan di hutan --aspect 9:16",
     "Contoh: /gambar kastil melayang --style fantasy",
     "Contoh: /placeholder AI Masa Depan --style futuristic --icon brain",
@@ -33,10 +38,11 @@ const randomHints = [
     "Contoh: /gambar sirkuit otak --style darkmode",
     "Contoh: /gambar pemandangan 8-bit --style pixelart",
     "Contoh: /gambar kekacauan warna --style abstract",
+    "Contoh: /wallpaper robot di kota hujan --aspect 9:16",
     "Contoh: /gambar patung romawi di pantai --style vaporwave",
 ];
 
-export const InputBar: React.FC<InputBarProps> = ({ onSubmit, isLoading }) => {
+export const InputBar: React.FC<InputBarProps> = ({ onSubmit, isLoading, isComicMode }) => {
   const [prompt, setPrompt] = useState('');
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
   const [filePreview, setFilePreview] = useState<string | null>(null);
@@ -127,12 +133,14 @@ export const InputBar: React.FC<InputBarProps> = ({ onSubmit, isLoading }) => {
     textareaRef.current?.focus();
   };
 
-  const placeholderText = attachedFile 
+  const placeholderText = isComicMode
+    ? "Ketik 'lanjutkan' untuk panel berikutnya..."
+    : attachedFile
     ? "Tambahkan komentar tentang file... (opsional)" 
-    : "Ketik pesan atau '/gambar' atau '/video'...";
+    : "Ketik pesan atau '/gambar' atau '/komik'...";
 
   const showCommandHint = prompt.trim().toLowerCase() === '/gambar' || prompt.trim().toLowerCase() === '/video';
-  const showStyleSelector = prompt.trim().toLowerCase().startsWith('/gambar');
+  const showStyleSelector = prompt.trim().toLowerCase().startsWith('/gambar') || prompt.trim().toLowerCase().startsWith('/komik');
   const currentStyleMatch = prompt.match(/--style\s+(\S+)/);
   const currentStyle = currentStyleMatch ? currentStyleMatch[1].toLowerCase() : null;
   const isTyping = prompt.length > 0 && !isLoading;
@@ -234,7 +242,7 @@ export const InputBar: React.FC<InputBarProps> = ({ onSubmit, isLoading }) => {
           <button
             onClick={handleSubmit}
             className="p-2 rounded-full bg-purple-600 text-white hover:bg-purple-500 transition-colors disabled:bg-purple-800 disabled:cursor-not-allowed shrink-0"
-            disabled={isLoading || (!prompt.trim() && !attachedFile)}
+            disabled={isLoading || (!prompt.trim() && !attachedFile && !isComicMode)}
             aria-label="Kirim"
           >
             <SendIcon className="w-6 h-6" />

@@ -1,0 +1,90 @@
+import jsPDF from 'jspdf';
+import 'jspdf-autotable';
+import pptxgen from 'pptxgenjs';
+import * as XLSX from 'xlsx';
+
+// --- PDF Generation from Simplified Markdown ---
+const addWrappedText = (doc: jsPDF, text: string, x: number, y: number, maxWidth: number, options: any = {}) => {
+  const lines = doc.splitTextToSize(text, maxWidth);
+  doc.text(lines, x, y, options);
+  return doc.getTextDimensions(lines).h;
+};
+
+export const createPdfFromMarkdown = (markdown: string, filename: string) => {
+  const doc = new jsPDF();
+  const pageHeight = doc.internal.pageSize.height;
+  const margin = 15;
+  let cursorY = margin;
+
+  const lines = markdown.split('\n');
+
+  for (const line of lines) {
+    if (cursorY > pageHeight - margin - 10) { // Add buffer
+      doc.addPage();
+      cursorY = margin;
+    }
+
+    const trimmedLine = line.trim();
+    if (trimmedLine.startsWith('## ')) {
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(16);
+      const textHeight = addWrappedText(doc, trimmedLine.substring(3), margin, cursorY, 180);
+      cursorY += textHeight + 4;
+    } else if (trimmedLine.startsWith('# ')) {
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(22);
+      const textHeight = addWrappedText(doc, trimmedLine.substring(2), margin, cursorY, 180);
+      cursorY += textHeight + 6;
+    } else if (trimmedLine.startsWith('* ') || trimmedLine.startsWith('- ')) {
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(12);
+      const bulletText = `• ${trimmedLine.substring(2)}`;
+      const textHeight = addWrappedText(doc, bulletText, margin + 5, cursorY, 175);
+      cursorY += textHeight + 2;
+    } else if (trimmedLine) {
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(12);
+      const textHeight = addWrappedText(doc, trimmedLine, margin, cursorY, 180);
+      cursorY += textHeight + 4;
+    } else {
+      cursorY += 6; // Space for empty lines
+    }
+  }
+
+  doc.save(filename);
+};
+
+// --- Slides (PPTX) Generation ---
+interface SlideData {
+  title: string;
+  content: string[];
+}
+
+export const createPptxFromSlidesData = (data: { slides: SlideData[] }, filename: string) => {
+  const pptx = new pptxgen();
+  pptx.layout = 'LAYOUT_16x9';
+
+  data.slides.forEach(slideData => {
+    const slide = pptx.addSlide();
+    slide.addText(slideData.title || 'Tanpa Judul', { x: 0.5, y: 0.25, w: '90%', h: 1, fontSize: 36, bold: true, align: 'center' });
+    
+    if (Array.isArray(slideData.content) && slideData.content.length > 0) {
+        slide.addText(slideData.content, { x: 0.5, y: 1.5, w: '90%', h: 4, fontSize: 18, align: 'left', bullet: true });
+    }
+  });
+
+  pptx.writeFile({ fileName: filename });
+};
+
+// --- Sheets (XLSX) Generation ---
+interface SheetData {
+  headers: string[];
+  rows: (string | number)[][];
+}
+
+export const createXlsxFromSheetData = (data: SheetData, filename: string) => {
+  const ws = XLSX.utils.aoa_to_sheet([data.headers, ...data.rows]);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Data');
+  XLSX.writeFile(wb, filename);
+};

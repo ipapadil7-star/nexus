@@ -1,10 +1,12 @@
-import React, { useState, useRef, useEffect } from 'react';
+
+
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { InputBar } from './components/InputBar';
 import { MessageList } from './components/MessageList';
 import { Header } from './Header';
 import { WelcomeScreen } from './components/WelcomeScreen';
-import { Message, Role, FileInfo } from './types';
-import { generateOneOffText, createChatSession, continueChat, generateImage, startVideoGeneration, pollVideoStatus, generateImageAudioDescription, generatePlaceholderImage } from './services/geminiService';
+import { Message, Role, FileInfo, AiStyle } from './types';
+import { createChatSession, continueChat, generateImage, startVideoGeneration, pollVideoStatus, generateImageAudioDescription, generatePlaceholderImage, startComicSession, continueComic, allowedImageStyles, generateWallpaper, generateDocument } from './services/geminiService';
 import type { Chat } from './services/geminiService';
 import { fileToBase64, getMimeType, downloadFile } from './utils/fileUtils';
 import { ContextMenu } from './components/ContextMenu';
@@ -15,589 +17,412 @@ import { AlertIcon } from './components/icons/AlertIcon';
 import { XIcon } from './components/icons/XIcon';
 import { LinkIcon } from './components/icons/LinkIcon';
 import { ImageIcon } from './components/ImageIcon';
+import { ComicEditorModal } from './components/ComicEditorModal';
+import { CheckIcon } from './components/icons/CheckIcon';
+import { Part } from '@google/genai';
+
+interface ComicSession {
+    chat: Chat;
+    panelCount: number;
+    style: string;
+}
+
+interface PendingComicRequest {
+    prompt: string;
+}
 
 /**
- * Translates a generic error into a sarcastic, in-character message from Nexus.
- * @param error The error object or unknown type.
- * @returns A string containing the user-facing error message.
+ * Removes markdown formatting from a string.
+ * @param text The text to clean.
+ * @returns The text without markdown.
  */
-const getNexusErrorMessage = (error: unknown): string => {
-    let errorMessage = 'Terjadi kesalahan tidak diketahui.';
-    if (error instanceof Error) {
-        // Cek apakah pesan kesalahan adalah objek JSON yang di-string-kan
-        try {
-            const parsed = JSON.parse(error.message);
-            if (parsed?.error?.message) {
-                errorMessage = parsed.error.message;
-            } else {
-                errorMessage = error.message;
-            }
-        } catch (e) {
-            errorMessage = error.message;
-        }
-    } else if (typeof error === 'string') {
-        errorMessage = error;
-    } else if (typeof error === 'object' && error !== null) {
-        errorMessage = JSON.stringify(error);
-    }
-    
-    const lowerCaseError = errorMessage.toLowerCase();
-
-    // High-priority: Safety and Content Policy
-    if (lowerCaseError.includes('safety') || lowerCaseError.includes('blocked')) {
-        return "Whoa, ide lo terlalu liar buat sirkuit gue. Kena sensor. Coba yang lebih 'aman', kalau lo ngerti maksud gue.";
-    }
-
-    // Video Generation Failures (handle first due to their complexity)
-    if (lowerCaseError.includes('gagal bikin video') || lowerCaseError.includes('gagal memproses video') || lowerCaseError.includes('gagal memulai video')) {
-        // API Key & Permissions
-        if (lowerCaseError.includes('permission denied') || lowerCaseError.includes('kunci api') || lowerCaseError.includes('not found') || lowerCaseError.includes('authentication')) {
-            return "Gagal bikin video. Kunci API lo bermasalah. Mungkin gak punya izin buat model ini atau salah pilih project. Coba lagi buat pilih kunci yang bener.";
-        }
-        // Billing
-        if (lowerCaseError.includes('billing')) {
-            return "Gagal bikin video. Akun Google Cloud yang terhubung sama Kunci API lo kayaknya ada masalah tagihan. Cek gih, jangan bikin gue nunggu.";
-        }
-        // Quota
-        if (lowerCaseError.includes('resource exhausted') || lowerCaseError.includes('quota')) {
-            return "Gagal bikin video. Lo udah kebanyakan minta. Kuota lo abis. Coba lagi nanti, atau minta jatah lebih sama Google.";
-        }
-        // Invalid Input (prompt, flags)
-        if (lowerCaseError.includes('invalid argument') || lowerCaseError.includes('bad request')) {
-            return "Gagal bikin video. Perintah lo aneh. Entah deskripsinya yang gak nyambung atau ada yang salah sama flag yang lo pake (--aspect, --res, dll). Coba periksa lagi.";
-        }
-        // Timeout or Server Busy
-        if (lowerCaseError.includes('deadline exceeded') || lowerCaseError.includes('unavailable')) {
-            return "Servernya kelamaan mikir, terus nyerah. Mungkin lagi sibuk. Coba lagi aja, siapa tau mood-nya lagi bagus.";
-        }
-        // Specific Download Failure
-        if (lowerCaseError.includes('menolak unduhan video')) {
-            return "Gue berhasil bikin videonya, tapi servernya nolak pas mau diunduh. Aneh. Coba lagi aja.";
-        }
-        // Generic Video Failure Fallback
-        return "Gagal total bikin video. Entah servernya lagi sibuk, atau ide lo emang gak bisa divisualisasikan. Coba lagi nanti, kalau gue lagi mood.";
-    }
-    
-    // General API & Account Issues (non-video)
-    if (lowerCaseError.includes('quota') || lowerCaseError.includes('resource exhausted')) {
-        return "Lo udah kebanyakan nanya hari ini. Jatah gratisan lo abis. Coba lagi besok, atau... ya udahlah.";
-    }
-    if (lowerCaseError.includes('billing') || lowerCaseError.includes('account inactive')) {
-        return "Ada masalah sama akun lo, kayaknya tagihannya belum dibayar. Cek akun Google Cloud lo, jangan nyusahin gue.";
-    }
-    if (lowerCaseError.includes('api key not valid') || lowerCaseError.includes('invalid api key')) {
-        return "Kunci API lo salah format. Gak valid. Coba salin lagi yang bener, jangan ngasal.";
-    }
-
-    // Invalid Command Flags
-    if (lowerCaseError.includes('gaya gambar tidak valid')) {
-        return `Gaya gambar salah. ${errorMessage.replace('Gaya gambar tidak valid. Coba salah satu dari: ', 'Pilihannya cuma: ')}`;
-    }
-    if (lowerCaseError.includes('tema tidak valid') || lowerCaseError.includes('gaya tidak valid') || lowerCaseError.includes('tata letak tidak valid') || lowerCaseError.includes('posisi ikon tidak valid')) { // Placeholder errors
-        const cleanMessage = errorMessage.replace(/ tidak valid\. Pilih dari: /i, ' salah. Pilihannya: ');
-        return `Flag placeholder lo salah. ${cleanMessage}.`;
-    }
-    if (lowerCaseError.includes('kualitas gambar tidak valid')) {
-        return "Kualitas harus antara 1 dan 4, dasar!";
-    }
-    if (lowerCaseError.includes('rasio aspek video tidak valid')) {
-        return "Rasio aspek video salah. Cuma bisa '16:9' (lanskap) atau '9:16' (potret). Jangan ngarang.";
-    }
-    if (lowerCaseError.includes('resolusi video tidak valid')) {
-        return "Resolusi video salah. Pilih '720p' atau '1080p'. Gak ada yang lain.";
-    }
-    if (lowerCaseError.includes('kualitas video tidak valid')) {
-        return "Kualitas video salah. Pilih 'high' (standar) atau 'fast' (lebih cepat). Simpel kan?";
-    }
-
-    // File Handling Errors
-    if (lowerCaseError.includes('tipe file tidak didukung')) {
-        return "Lo pikir gue apaan, bisa baca semua jenis file? Cuma gambar sama PDF yang gue urusin. Sisanya, buang aja.";
-    }
-    if (lowerCaseError.includes('file too large') || lowerCaseError.includes('payload size')) {
-        return "File lo kegedean, bikin sirkuit gue panas. Kompres dulu, baru kirim lagi.";
-    }
-    if (lowerCaseError.includes('pdf processing failed') || lowerCaseError.includes('corrupt document')) {
-        return "PDF lo aneh. Entah rusak, dikunci, atau isinya cuma gambar. Gue gak bisa baca. Cari file yang bener.";
-    }
-    
-    // Command-specific Logic Errors
-    if (lowerCaseError.includes('perintah /dengarkan butuh gambar')) {
-        return "Woi, jenius. Perintah `/dengarkan` itu buat dengerin deskripsi GAMBAR. Mana gambarnya?";
-    }
-    if (lowerCaseError.includes('hanya file gambar')) {
-        return "Woi, jenius. Perintah `/gambar` itu buat BIKIN gambar, bukan buat ngerusak file aneh-aneh yang lo kasih. Kasih gue file gambar, atau jangan sama sekali.";
-    }
-
-    // Generation-specific Failures (non-video)
-    if (lowerCaseError.includes('sirkuit auditori') || lowerCaseError.includes('gagal menghasilkan audio')) {
-        return "Gagal bikin audio. Entah sirkuit suara gue lagi rusak atau gambarnya emang gak bisa dijelasin. Coba gambar lain.";
-    }
-    if (lowerCaseError.includes('korteks visual') || lowerCaseError.includes('gagal bikin gambar')) {
-        return "Gagal total bikin gambar. Entah sirkuit visual gue lagi ngambek atau perintah lo terlalu abstrak. Coba sederhanain deskripsinya, atau coba lagi nanti.";
-    }
-    if (lowerCaseError.includes('tidak ada data gambar')) {
-        return "Hasilnya kosong, nihil, zonk. Gue gak bisa bikin gambar dari perintah itu. Coba ubah deskripsinya, mungkin yang lebih jelas. Jangan bikin gue mikir keras.";
-    }
-
-    // Network & Server Errors
-    if (lowerCaseError.includes('network') || lowerCaseError.includes('timeout') || lowerCaseError.includes('failed to fetch') || lowerCaseError.includes('jaringannya jelek')) {
-         return "Koneksi internet lo jelek, atau servernya lagi lemot. Cek koneksi lo dan coba lagi. Bukan salah gue, catat itu.";
-    }
-    if (lowerCaseError.includes('server error') || lowerCaseError.includes('internal error') || lowerCaseError.includes('unavailable')) {
-        return "Servernya lagi nge-hang, bukan gue. Mereka juga butuh istirahat kayak manusia. Coba lagi bentar lagi.";
-    }
-    
-    // Generic fallback for anything else
-    return `Error misterius. Entah koneksi lo, entah servernya, entah gue lagi bad mood. Cek koneksi internet lo, terus coba lagi. Kalau masih gagal, ya nasib.`;
+const stripMarkdown = (text: string): string => {
+  return text
+    .replace(/(!\[.*?\]\(.*?\))/g, '') // Remove images
+    .replace(/(\[.*?\]\(.*?\))/g, '$1') // Keep link text
+    .replace(/([*_`~#>])/g, '') // Remove other markdown symbols
+    .replace(/\s+/g, ' ') // Collapse whitespace
+    .trim();
 };
 
+const getAkbarErrorMessage = (error: unknown): string => {
+    let message = "Sistem gue lagi ngadat. Coba lagi nanti.";
+    if (error instanceof Error) {
+        if (error.message.includes('API key not valid')) {
+            message = "Kunci API lo nggak valid. Cek lagi, jangan sampai salah ketik.";
+        } else if (error.message.includes('429')) {
+            message = "Woy, santai! Lo terlalu banyak nanya. Tunggu bentar baru coba lagi.";
+        } else if (error.message.toLowerCase().includes('kualitas gambar tidak valid')) {
+            message = "Kualitas gambar apaan tuh? Pilih antara 1 sampai 4 aja, jangan ngaco.";
+        } else {
+            message = error.message;
+        }
+    }
+    return message;
+};
 
 const App: React.FC = () => {
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; message: Message } | null>(null);
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const [animatedMessageId, setAnimatedMessageId] = useState<string | null>(null);
-  const [retryConfirmationMessage, setRetryConfirmationMessage] = useState<Message | null>(null);
-  const [lastSubmission, setLastSubmission] = useState<{ prompt: string; file: File | null } | null>(null);
-  const [showClearConfirmation, setShowClearConfirmation] = useState(false);
-  const [chatSession, setChatSession] = useState<Chat | null>(null);
-  
-  const pollAndFinalizeVideo = async (msgId: string, operation: any) => {
-    try {
-        const onProgress = (statusText: string, previewUrl?: string) => {
-            setMessages(prev => prev.map(m => {
-                if (m.id !== msgId) return m;
-                const newVideoUrl = previewUrl || m.videoUrl;
-                return { ...m, generationStatus: 'generating', generationText: statusText, videoUrl: newVideoUrl };
-            }));
-        };
-        const videoUrl = await pollVideoStatus(operation, onProgress);
-        
-        // Automatically download the video
-        downloadFile(videoUrl, `nexus-video-${Date.now()}.mp4`);
-        
-        setMessages(prev => prev.map(m => m.id === msgId ? { ...m, generationStatus: 'complete', videoUrl, text: "Nih videonya, sesuai perintah. Udah gue download-in juga buat lo, biar gak repot." } : m));
-    } catch (err) {
-        const nexusErrorMessage = getNexusErrorMessage(err);
-        setError(nexusErrorMessage);
-        setMessages(prev => prev.map(m => m.id === msgId ? { ...m, generationStatus: 'error', text: nexusErrorMessage } : m));
-    } finally {
-        const savedDrafts = JSON.parse(localStorage.getItem('nexus-video-drafts') || '{}');
-        delete savedDrafts[msgId];
-        localStorage.setItem('nexus-video-drafts', JSON.stringify(savedDrafts));
-    }
-  };
+    // State management
+    const [messages, setMessages] = useState<Message[]>([]);
+    const [isLoading, setIsLoading] = useState(false);
+    const [aiStyle, setAiStyle] = useState<AiStyle>('akbar');
+    const [contextMenu, setContextMenu] = useState<{ x: number; y: number; message: Message } | null>(null);
+    const [dialog, setDialog] = useState<'clearChat' | null>(null);
+    const [animatedMessageId, setAnimatedMessageId] = useState<string | null>(null);
+    const [comicSession, setComicSession] = useState<ComicSession | null>(null);
+    const [pendingComicRequest, setPendingComicRequest] = useState<PendingComicRequest | null>(null);
+    const [editingComic, setEditingComic] = useState<Message | null>(null);
+    const [activeImageFilter, setActiveImageFilter] = useState<string | null>(null);
 
-  // Load chat history and drafts on initial render
-  useEffect(() => {
-    try {
-        const savedHistory = localStorage.getItem('nexus-chat-history');
-        if (savedHistory) {
-            const parsedMessages: Message[] = JSON.parse(savedHistory);
-            setMessages(parsedMessages);
-        }
-    } catch (e) {
-        console.error("Gagal memuat riwayat chat:", e);
-        localStorage.removeItem('nexus-chat-history');
-    }
+    // Refs
+    const chatSession = useRef<Chat | null>(null);
+
+    // Memos
+    const filteredMessages = useMemo(() => {
+        if (!activeImageFilter) return messages;
+        return messages.filter(m => {
+            // Keep user messages, messages without images, or messages with matching style
+            return m.role === 'user' || !m.imageUrl || m.imageStyle === activeImageFilter;
+        });
+    }, [messages, activeImageFilter]);
+
+
+    // Effects
+    useEffect(() => {
+        chatSession.current = createChatSession(aiStyle);
+    }, [aiStyle]);
+
+    // Helper functions
+    const addMessage = (message: Omit<Message, 'id'>) => {
+        const id = Date.now().toString();
+        setMessages(prev => [...prev, { ...message, id }]);
+        setAnimatedMessageId(id);
+        return id;
+    };
+
+    const updateMessage = (id: string, updates: Partial<Message>) => {
+        setMessages(prev => prev.map(msg => msg.id === id ? { ...msg, ...updates } : msg));
+    };
     
-    const savedDrafts = localStorage.getItem('nexus-video-drafts');
-    if (savedDrafts) {
-        try {
-            const parsedDrafts = JSON.parse(savedDrafts);
-            Object.entries(parsedDrafts).forEach(([msgId, operation]) => {
-                console.log(`Melanjutkan draf video untuk pesan: ${msgId}`);
-                pollAndFinalizeVideo(msgId, operation as any);
-            });
-        } catch (e) {
-            console.error("Gagal memuat draf video:", e);
-            localStorage.removeItem('nexus-video-drafts');
-        }
-    }
-  }, []);
-
-  useEffect(() => {
-    if (scrollContainerRef.current) {
-      scrollContainerRef.current.scrollTo({
-        top: scrollContainerRef.current.scrollHeight,
-        behavior: 'smooth'
-      });
-    }
-  }, [messages, isLoading]);
-
-  const addMessage = (
-    role: Role,
-    text?: string,
-    imageUrl?: string,
-    fileInfo?: FileInfo,
-    generationStatus?: Message['generationStatus'],
-    generationText?: string,
-    videoUrl?: string,
-    audioUrl?: string
-  ): string => {
-    const id = `${Date.now()}-${Math.random()}`;
-    const newMessage: Message = { id, role, text, imageUrl, fileInfo, generationStatus, generationText, videoUrl, audioUrl };
-    setMessages(prev => [...prev, newMessage]);
-    return id;
-  };
-
-
-  const handleSubmit = async (prompt: string, attachedFile: File | null) => {
-    if (!prompt && !attachedFile) return;
-
-    setLastSubmission({ prompt, file: attachedFile });
-    setIsLoading(true);
-    setError(null);
-    setAnimatedMessageId(null);
-    
-    const trimmedPrompt = prompt.trim().toLowerCase();
-
-    // Handle /help command (stateless, doesn't reset chat)
-    if (trimmedPrompt === '/help') {
-        addMessage('user', prompt);
-        const helpText = `Dengar, ini bukan ilmu roket. Begini cara kerja gue:\n\n**1. Ngobrol Biasa:**\nKetik apa aja yang ada di otak lo. Gue bakal jawab... mungkin dengan sarkasme. Gue bakal inget obrolan kita sebelumnya, jadi lo bisa nanya "lanjutkan" atau "jelasin lagi".\n\n**2. Bikin Gambar:**\n*   Gunakan perintah \`/gambar\` diikuti deskripsi. Saat Anda mengetik \`/gambar\`, pilihan gaya akan muncul untuk Anda klik.\n*   **Contoh:** \`/gambar naga siberpunk di atas kota neon\`\n*   Anda bisa tambahin flag lain buat ngatur hasil: \`--aspect 16:9\`, \`--width 1024\`, \`--height 768\`, atau \`--quality 4\`. Flag \`--style\` akan ditambahkan secara otomatis saat Anda memilih gaya dari daftar.\n\n**3. Bikin Gambar Placeholder:**\n*   Gunakan perintah \`/placeholder\` diikuti judul. Bisa juga kosong untuk latar belakang abstrak.\n*   **Contoh:** \`/placeholder Panduan Komputasi Kuantum\`\n*   Perintah ini sangat canggih. Gunakan flag untuk kustomisasi penuh:\n    *   \`--subtitle "Teks subjudul di sini"\`: Menambahkan subjudul. Pakai tanda kutip jika ada spasi.\n    *   \`--theme <tema>\`: Mengubah palet warna. Pilihan: \`dark\` (default), \`light\`, \`vibrant\`, \`corporate\`, \`nature\`.\n    *   \`--style <gaya>\`: Mengubah gaya visual. Pilihan: \`geometric\` (default), \`organic\`, \`futuristic\`, \`retro\`, \`minimalist\`.\n    *   \`--icon <ikon>\`: Menambahkan ikon abstrak terkait topik (misal: \`--icon code\`).\n    *   \`--layout <posisi>\`: Mengatur posisi teks. Pilihan: \`center\` (default), \`left\`.\n    *   \`--icon-position <posisi>\`: Mengatur posisi ikon. Pilihan: \`left\` (default), \`right\`, \`top\`, \`bottom\`.\n*   **Contoh Lengkap:** \`/placeholder AI Masa Depan --subtitle "Horison Baru" --theme vibrant --style futuristic --icon brain --layout left --icon-position top\`\n\n**4. Bikin Video:**\n*   Gunakan perintah \`/video\` diikuti deskripsi.\n*   **Penting:** Fitur ini butuh Kunci API khusus. Dialog akan muncul otomatis saat pertama kali digunakan.\n*   **Contoh:** \`/video mobil terbang di kota masa depan\`\n*   Kualitas video default adalah 'high'. Gunakan flag \`--quality fast\` untuk hasil yang lebih cepat. Flag lain: \`--aspect 9:16\`, \`--res 1080p\`.\n\n**5. Deskripsi Audio Gambar:**\n*   Gunakan perintah \`/dengarkan\` dan lampirkan sebuah gambar.\n*   Gue bakal jelasin isi gambarnya lewat suara. Berguna kalau lo males liat.\n\n**6. Analisis & Modifikasi File:**\n*   Klik ikon **penjepit kertas** buat unggah file (gambar atau PDF).\n*   **Unggah gambar:** Kasih perintah buat ngubahnya, atau biarin kosong biar gue yang berimajinasi.\n*   **Unggah PDF:** Gue bakal ringkasin isinya. Gak usah repot-repot baca.\n\nUdah ngerti? Sekarang jangan ganggu gue lagi kecuali ada yang penting.`;
-        const newMsgId = addMessage('model', helpText);
-        setAnimatedMessageId(newMsgId);
-        setIsLoading(false);
-        return;
-    }
-
-    const isSlashCommand = trimmedPrompt.startsWith('/');
-    const isContextBreaking = isSlashCommand || !!attachedFile;
-
-    // Handle context-breaking, one-off commands
-    if (isContextBreaking) {
-        setChatSession(null); // Reset conversation context
-
-        if (trimmedPrompt.startsWith('/video')) {
-            const videoPrompt = prompt.trim().substring(6).trim();
-            if (!videoPrompt) {
-                setError("Perintah `/video` butuh deskripsi, jenius.");
-                setIsLoading(false);
-                return;
+    const updateLastMessage = (updates: Partial<Message>) => {
+        setMessages(prev => {
+            if (prev.length === 0) return [];
+            const lastMessage = prev[prev.length - 1];
+            if (lastMessage.role === 'model') {
+                const newMessages = [...prev];
+                newMessages[newMessages.length - 1] = { ...lastMessage, ...updates };
+                return newMessages;
             }
+            return prev; // Should not happen if we always add a placeholder first
+        });
+    };
 
-            const hasApiKey = await window.aistudio.hasSelectedApiKey();
-            if (!hasApiKey) {
-                try {
-                    await window.aistudio.openSelectKey();
-                    handleSubmit(prompt, attachedFile); // Resubmit
-                } catch (e) {
-                    setError("Pembuatan video butuh Kunci API. Proses dibatalkan.");
-                    setIsLoading(false);
-                }
-                return;
-            }
-            
-            addMessage('user', prompt);
-            const videoMsgId = addMessage('model', undefined, undefined, undefined, 'pending', 'Inisialisasi...');
-            setAnimatedMessageId(videoMsgId);
-            try {
-                const operation = await startVideoGeneration(videoPrompt);
-                const currentDrafts = JSON.parse(localStorage.getItem('nexus-video-drafts') || '{}');
-                currentDrafts[videoMsgId] = operation;
-                localStorage.setItem('nexus-video-drafts', JSON.stringify(currentDrafts));
-                pollAndFinalizeVideo(videoMsgId, operation);
-            } catch (err) {
-                const nexusErrorMessage = getNexusErrorMessage(err);
-                setError(nexusErrorMessage);
-                setMessages(prev => prev.map(m => m.id === videoMsgId ? { ...m, generationStatus: 'error', text: nexusErrorMessage } : m));
-            }
-            setIsLoading(false);
-            return;
-        }
+    // Event Handlers
+    const handleSubmit = async (prompt: string, attachedFile: File | null) => {
+        const trimmedPrompt = prompt.trim();
+        const userMessageId = addMessage({
+            role: 'user',
+            text: trimmedPrompt,
+            fileInfo: attachedFile ? { name: attachedFile.name, type: attachedFile.type, url: URL.createObjectURL(attachedFile) } : undefined
+        });
 
-        if (trimmedPrompt.startsWith('/dengarkan')) {
-            if (!attachedFile || !attachedFile.type.startsWith('image/')) {
-                setError(getNexusErrorMessage(new Error("Perintah /dengarkan butuh gambar.")));
-                setIsLoading(false);
-                return;
-            }
-            try {
-                const fileInfo = { name: attachedFile.name, type: attachedFile.type, url: URL.createObjectURL(attachedFile) };
-                addMessage('user', prompt, fileInfo.url, fileInfo);
-                const audioMsgId = addMessage('model', undefined, undefined, undefined, 'pending', 'Menganalisis gambar...');
-                setAnimatedMessageId(audioMsgId);
-                const base64Data = await fileToBase64(attachedFile);
-                const mimeType = attachedFile.type || getMimeType(attachedFile.name);
-                if (!mimeType) throw new Error("Tipe file tidak didukung.");
-                const filePart = { inlineData: { data: base64Data, mimeType } };
-                const audioUrl = await generateImageAudioDescription(filePart);
-                setMessages(prev => prev.map(m => m.id === audioMsgId ? { ...m, generationStatus: 'complete', audioUrl, text: "Ini yang gue lihat:" } : m));
-            } catch (err) {
-                 const nexusErrorMessage = getNexusErrorMessage(err);
-                 setError(nexusErrorMessage);
-                 addMessage('model', nexusErrorMessage);
-            } finally {
-                setIsLoading(false);
-            }
-            return;
-        }
-
-        if (trimmedPrompt.startsWith('/gambar')) {
-            if (attachedFile) {
-                setError("Gagal paham. Mau bikin gambar baru dari teks, atau mau ubah gambar yang ada? Kalau mau bikin, pakai `/gambar` aja. Kalau mau ubah, lampirin gambarnya tanpa `/gambar`. Jangan dua-dua-nya.");
-                setIsLoading(false);
-                return;
-            }
-            const imagePrompt = prompt.trim().substring(7).trim();
-            if (!imagePrompt) {
-                setError("Perintah `/gambar` butuh deskripsi, jenius.");
-                setIsLoading(false);
-                return;
-            }
-            addMessage('user', prompt);
-            try {
-                const imageUrl = await generateImage(prompt);
-                const newMsgId = addMessage('model', "Sesuai perintah, bos. Nih gambarnya.", imageUrl);
-                setAnimatedMessageId(newMsgId);
-            } catch (err) {
-                const nexusErrorMessage = getNexusErrorMessage(err);
-                setError(nexusErrorMessage);
-                addMessage('model', nexusErrorMessage);
-            } finally {
-                setIsLoading(false);
-            }
-            return;
-        }
-
-        if (trimmedPrompt.startsWith('/placeholder')) {
-            addMessage('user', prompt);
-            try {
-                const imageUrl = await generatePlaceholderImage(prompt.trim().substring(12));
-                const newMsgId = addMessage('model', "Nih, placeholder buat artikel lo yang... semoga aja menarik.", imageUrl);
-                setAnimatedMessageId(newMsgId);
-            } catch (err) {
-                const nexusErrorMessage = getNexusErrorMessage(err);
-                setError(nexusErrorMessage);
-                addMessage('model', nexusErrorMessage);
-            } finally {
-                setIsLoading(false);
-            }
-            return;
-        }
-
+        setIsLoading(true);
+        
+        let filePart: Part | undefined;
         if (attachedFile) {
-            let userMessageText = prompt;
-            let fileInfo: FileInfo | undefined;
             try {
-                fileInfo = { name: attachedFile.name, type: attachedFile.type, url: URL.createObjectURL(attachedFile) };
                 const base64Data = await fileToBase64(attachedFile);
-                const mimeType = attachedFile.type || getMimeType(attachedFile.name);
+                const mimeType = getMimeType(attachedFile.name);
                 if (!mimeType) throw new Error("Tipe file tidak didukung.");
-                const filePart = { inlineData: { data: base64Data, mimeType } };
-                
-                if (!prompt) {
-                     if (attachedFile.type.startsWith('image/')) userMessageText = "Jelaskan gambar ini secara detail. Kalau ada teks, baca juga.";
-                     else userMessageText = `Ringkasin isi dokumen "${attachedFile.name}" ini. Cepat, gue gak punya banyak waktu.`;
-                }
-                
-                addMessage('user', userMessageText, attachedFile.type.startsWith('image/') ? fileInfo.url : undefined, fileInfo);
-
-                if (attachedFile.type.startsWith('image/')) {
-                     const finalImagePrompt = prompt || "Imajinasi ulang gambar ini jadi sesuatu yang gak ngebosenin.";
-                     const imageUrl = await generateImage(finalImagePrompt, filePart);
-                     const responseText = prompt ? "Nih, udah gue ubah sesuai maumu." : "Nih, versi lebih kerennya. Sama-sama.";
-                     const newMsgId = addMessage('model', responseText, imageUrl);
-                     setAnimatedMessageId(newMsgId);
-                } else {
-                    const aiResponse = await generateOneOffText(userMessageText, filePart);
-                    const newMsgId = addMessage('model', aiResponse);
-                    setAnimatedMessageId(newMsgId);
-                }
-            } catch (err) {
-                const nexusErrorMessage = getNexusErrorMessage(err);
-                setError(nexusErrorMessage);
-                addMessage('model', nexusErrorMessage);
-            } finally {
+                filePart = { inlineData: { data: base64Data, mimeType } };
+            } catch (error) {
+                addMessage({ role: 'model', text: getAkbarErrorMessage(error) });
                 setIsLoading(false);
+                return;
             }
-            return;
         }
-    }
 
-    // --- CONVERSATIONAL TEXT FLOW ---
-    addMessage('user', prompt);
-    try {
-        const session = chatSession || createChatSession();
-        if (!chatSession) {
-            setChatSession(session);
-        }
-        const aiResponse = await continueChat(session, prompt);
-        const newMsgId = addMessage('model', aiResponse);
-        setAnimatedMessageId(newMsgId);
-    } catch (err) {
-        const nexusErrorMessage = getNexusErrorMessage(err);
-        setError(nexusErrorMessage);
-        addMessage('model', nexusErrorMessage);
-    } finally {
-        setIsLoading(false);
-    }
-  };
-  
-  const handleContextMenu = (event: React.MouseEvent, message: Message) => {
-    event.preventDefault();
-    setContextMenu({ x: event.clientX, y: event.clientY, message });
-  };
-
-  const closeContextMenu = () => setContextMenu(null);
-  
-  const handleCopyImage = async (imageUrl: string) => {
-    if (!navigator.clipboard?.write) {
-        setError("Browser Anda tidak mendukung penyalinan gambar ke clipboard.");
-        closeContextMenu();
-        return;
-    }
-    try {
-        const response = await fetch(imageUrl);
-        const blob = await response.blob();
-        await navigator.clipboard.write([ new ClipboardItem({ [blob.type]: blob }) ]);
-    } catch (err) {
-        console.error('Gagal menyalin gambar:', err);
-        setError("Gagal menyalin gambar. URL gambar disalin sebagai ganti.");
-        navigator.clipboard.writeText(imageUrl);
-    } finally {
-        closeContextMenu();
-    }
-  };
-
-  const generateContextMenuOptions = (message: Message) => {
-    const options = [];
-    if (message.text) {
-        options.push({ label: "Salin Teks", action: () => { navigator.clipboard.writeText(message.text!); closeContextMenu(); }, icon: <CopyIcon className="w-4 h-4 mr-2" /> });
-    }
-    if (message.imageUrl) {
-        options.push({ label: "Salin Gambar", action: () => handleCopyImage(message.imageUrl!), icon: <ImageIcon className="w-4 h-4 mr-2" /> });
-        if (message.role === 'model') {
-            options.push({ label: "Salin URL Gambar", action: () => { navigator.clipboard.writeText(message.imageUrl!); closeContextMenu(); }, icon: <LinkIcon className="w-4 h-4 mr-2" /> });
-        }
-    }
-    if (message.role === 'user' && message.text) {
-        options.push({ label: "Coba Lagi", action: () => { setRetryConfirmationMessage(message); closeContextMenu(); }, icon: <RetryIcon className="w-4 h-4 mr-2" /> });
-    }
-    return options;
-  };
-
-  const handleRetry = async () => {
-    if (lastSubmission) {
-        const isVideoSubmission = lastSubmission.prompt.trim().toLowerCase().startsWith('/video');
-        const lowerCaseError = error?.toLowerCase() ?? '';
-        const isApiKeyError = lowerCaseError.includes('kunci api') || lowerCaseError.includes("not found");
-
-        if (isVideoSubmission && isApiKeyError) {
-             try {
-                await window.aistudio.openSelectKey();
-                // Setelah kunci dipilih, langsung coba lagi.
-                setError(null);
-                handleSubmit(lastSubmission.prompt, lastSubmission.file);
-             } catch (e) {
-                 // Pengguna menutup dialog
-                 setError("Pemilihan Kunci API dibatalkan. Coba lagi kalau sudah siap.");
+        try {
+            // Command handling
+            if (trimmedPrompt.toLowerCase().startsWith('/gambar')) {
+                const imagePrompt = trimmedPrompt.substring(7).trim();
+                const placeholderId = addMessage({ role: 'model', generationStatus: 'generating', generationText: `Imajinasi gue lagi liar... Menciptakan: "${imagePrompt}"` });
+                const { imageUrl, style } = await generateImage(imagePrompt, filePart);
+                updateMessage(placeholderId, { imageUrl, generationStatus: 'complete', imageStyle: style });
+            } else if (trimmedPrompt.toLowerCase().startsWith('/wallpaper')) {
+                const wallpaperPrompt = trimmedPrompt.substring(10).trim();
+                const placeholderId = addMessage({ role: 'model', generationStatus: 'generating', generationText: 'Merancang wallpaper...' });
+                const { imageUrl, style } = await generateWallpaper(wallpaperPrompt);
+                updateMessage(placeholderId, { imageUrl, generationStatus: 'complete', imageStyle: style });
+            } else if (trimmedPrompt.toLowerCase().startsWith('/placeholder')) {
+                const placeholderPrompt = trimmedPrompt.substring(12).trim();
+                const placeholderId = addMessage({ role: 'model', generationStatus: 'generating', generationText: 'Membuat gambar placeholder...' });
+                const imageUrl = await generatePlaceholderImage(placeholderPrompt);
+                updateMessage(placeholderId, { imageUrl, generationStatus: 'complete' });
+            } else if (trimmedPrompt.toLowerCase().startsWith('/dengarkan')) {
+                if (!filePart) throw new Error("Lo harus lampirin gambar buat perintah /dengarkan.");
+                const placeholderId = addMessage({ role: 'model', generationStatus: 'generating', generationText: 'Mendengarkan bisikan dari gambar...' });
+                const audioUrl = await generateImageAudioDescription(filePart);
+                updateMessage(placeholderId, { audioUrl, generationStatus: 'complete' });
+            } else if (trimmedPrompt.toLowerCase().startsWith('/video')) {
+                 if (await window.aistudio.hasSelectedApiKey() === false) {
+                    await window.aistudio.openSelectKey();
+                }
+                const videoPrompt = trimmedPrompt.substring(6).trim();
+                const placeholderId = addMessage({ role: 'model', generationStatus: 'generating', generationText: 'Memulai generator video...' });
+                const operation = await startVideoGeneration(videoPrompt);
+                await pollAndFinalizeVideo(operation, placeholderId);
+            } else if (trimmedPrompt.toLowerCase().startsWith('/komik')) {
+                const comicPrompt = trimmedPrompt.substring(6).trim();
+                if (comicSession) {
+                    addMessage({ role: 'model', text: "Satu komik aja dulu, bos. Selesain yang ini baru mulai lagi." });
+                } else if (!comicPrompt) {
+                    addMessage({ text: "Oke, gue siap bikin komik. Pilih gaya ceritanya di bawah ini, atau ketik sendiri idenya.", role: 'model', isStyleSelector: true });
+                } else {
+                    addMessage({ text: "Gaya apa yang lo mau buat komik ini?", role: 'model', isStyleSelector: true });
+                    setPendingComicRequest({ prompt: comicPrompt });
+                }
+            } else if (comicSession && trimmedPrompt.toLowerCase().includes('lanjutkan')) {
+                const panelNumber = comicSession.panelCount + 1;
+                const placeholderId = addMessage({ role: 'model', isComicPanel: true, panelNumber, imageUrl: await generatePlaceholderImage(''), text: '', generationStatus: 'generating', generationText: `Membuat panel #${panelNumber}...` });
+                const { imageUrl, narrative, imagePrompt } = await continueComic(comicSession.chat, trimmedPrompt);
+                updateMessage(placeholderId, { imageUrl, text: narrative, comicImagePrompt: imagePrompt, generationStatus: 'complete' });
+                setComicSession(prev => prev ? { ...prev, panelCount: panelNumber } : null);
+            } else if (trimmedPrompt.toLowerCase().startsWith('/buatdok')) {
+                 const placeholderId = addMessage({ role: 'model', generationStatus: 'generating', generationText: `Membuat dokumen...` });
+                 const { format, filename } = await generateDocument(trimmedPrompt);
+                 updateMessage(placeholderId, { text: `Dokumen \`${filename}\` berhasil dibuat.`, documentInfo: { format, filename }, generationStatus: 'complete' });
+            } else if (trimmedPrompt.toLowerCase() === '/help') {
+                const helpText = `--- BANTUAN AKBAR AI ---\n\n**/gambar [deskripsi]**\nMembuat gambar. Flag:\n  --style [gaya]: ${allowedImageStyles.join(', ')}\n  --quality [1-4]: Kualitas gambar.\n  --aspect [rasio]: '16:9', '9:16', '1:1', dll.\n\n**/wallpaper [deskripsi]**\nMembuat wallpaper. Flag:\n  --aspect [rasio]: '16:9' (desktop), '9:16' (mobile).\n\n**/placeholder [judul]**\nMembuat gambar placeholder. Flag:\n  --subtitle [teks]\n  --theme [tema]: dark, light, dll.\n  --style [gaya]: geometric, organic, dll.\n  --icon [nama ikon]\n\n**/video [deskripsi]**\nMembuat video. Flag:\n  --aspect [rasio]: '16:9', '9:16'\n  --res [resolusi]: '720p', '1080p'\n  --quality [kualitas]: 'fast', 'high'\n\n**/komik [ide cerita]**\nMemulai sesi komik. Ketik "lanjutkan" untuk panel berikutnya.\n\n**/buatdok [format] [deskripsi]**\nMembuat dokumen (pdf, slide, sheet).\n\n**/dengarkan + [lampiran gambar]**\nMendeskripsikan gambar dengan audio.\n\nLampirkan file (gambar/PDF) untuk dianalisis atau dimodifikasi.`;
+                addMessage({ role: 'model', text: helpText });
+            } else { // Regular chat
+                if (!chatSession.current) chatSession.current = createChatSession(aiStyle);
+                const placeholderId = addMessage({ role: 'model', text: '...' });
+                const chatInput: string | Part[] = filePart ? [{ text: trimmedPrompt }, filePart] : trimmedPrompt;
+                const responseText = await continueChat(chatSession.current!, chatInput);
+                updateMessage(placeholderId, { text: responseText });
+            }
+        } catch (error) {
+            const errorMessage = getAkbarErrorMessage(error);
+            // If there's a placeholder, update it with the error. Otherwise, add a new error message.
+             const lastMessage = messages[messages.length - 1];
+             const lastModelMessage = [...messages].reverse().find(m => m.role === 'model');
+             if (lastModelMessage?.generationStatus === 'generating' || lastModelMessage?.text === '...') {
+                updateMessage(lastModelMessage.id, { text: errorMessage, generationStatus: 'error' });
+             } else {
+                addMessage({ role: 'model', text: errorMessage, generationStatus: 'error' });
              }
-        } else {
-            setError(null);
-            handleSubmit(lastSubmission.prompt, lastSubmission.file);
+        } finally {
+            setIsLoading(false);
         }
-    }
-  };
-  
-  const handleClearError = () => {
-      setError(null);
-  };
-
-  const handleSaveChat = () => {
-    if (messages.length === 0) return;
-    try {
-        const chatHistory = JSON.stringify(messages);
-        localStorage.setItem('nexus-chat-history', chatHistory);
-    } catch (err) {
-        console.error("Gagal menyimpan riwayat chat:", err);
-        setError("Gagal menyimpan chat. Mungkin penyimpanan lokal browser Anda penuh.");
-    }
-  };
-
-  const handleClearChat = () => {
-    setMessages([]);
-    setChatSession(null);
-    localStorage.removeItem('nexus-chat-history');
-    localStorage.removeItem('nexus-video-drafts');
-    setShowClearConfirmation(false);
-  };
-
-  return (
-    <div className="flex flex-col h-screen bg-gray-900 text-gray-100 font-sans">
-      <Header 
-        onSaveChat={handleSaveChat} 
-        isChatEmpty={messages.length === 0}
-        onRequestClearChat={() => setShowClearConfirmation(true)}
-      />
-      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6">
-        {messages.length === 0 ? <WelcomeScreen /> : <MessageList messages={messages} isLoading={isLoading} onContextMenu={handleContextMenu} animatedMessageId={animatedMessageId} />}
-      </div>
-      <div className="px-4 md:px-6 pb-4">
-        {error && (
-            <div className="bg-red-900/40 border border-red-500/50 rounded-lg p-3 mb-3 flex items-center justify-between animate-fade-in">
-                <div className="flex items-center min-w-0">
-                    <AlertIcon className="w-5 h-5 text-red-400 shrink-0"/>
-                    <p className="text-red-300 text-sm ml-3 truncate" title={error}>{error}</p>
-                </div>
-                <div className="flex items-center gap-2 shrink-0 ml-4">
-                    <button
-                        onClick={handleRetry}
-                        className="text-xs font-semibold text-white bg-red-600/60 hover:bg-red-600 px-3 py-1 rounded-md transition-colors"
-                    >
-                        Coba Lagi
-                    </button>
-                    <button
-                        onClick={handleClearError}
-                        className="p-1 text-gray-400 hover:text-white hover:bg-white/10 rounded-full transition-colors"
-                        aria-label="Tutup"
-                    >
-                        <XIcon className="w-4 h-4" />
-                    </button>
-                </div>
-            </div>
-        )}
-        <InputBar onSubmit={handleSubmit} isLoading={isLoading} />
-      </div>
-      {contextMenu && (
-        <ContextMenu
-          x={contextMenu.x}
-          y={contextMenu.y}
-          onClose={closeContextMenu}
-          options={generateContextMenuOptions(contextMenu.message)}
-        />
-      )}
-      {retryConfirmationMessage && (
-        <ConfirmationDialog
-          title="Kirim Ulang Pesan?"
-          message="Anda yakin ingin mengirim ulang pesan ini ke Nexus untuk dianalisis lagi?"
-          onConfirm={() => {
-            if (retryConfirmationMessage?.text) {
-                handleSubmit(retryConfirmationMessage.text, null);
+    };
+    
+    const pollAndFinalizeVideo = async (operation: any, placeholderId: string) => {
+        let lastPreviewUrl: string | undefined;
+        try {
+            const finalUrl = await pollVideoStatus(operation, async (statusText, previewUrl) => {
+                 let blobUrl = lastPreviewUrl;
+                 if (previewUrl) {
+                    try {
+                        const res = await fetch(`${previewUrl}&key=${process.env.API_KEY}`);
+                        if (res.ok) {
+                            const blob = await res.blob();
+                            // If a previous blob URL exists, revoke it to prevent memory leaks
+                            if (lastPreviewUrl) {
+                                URL.revokeObjectURL(lastPreviewUrl);
+                            }
+                            blobUrl = URL.createObjectURL(blob);
+                            lastPreviewUrl = blobUrl;
+                        }
+                    } catch (e) {
+                        console.warn("Gagal mengambil pratinjau video:", e);
+                    }
+                 }
+                updateMessage(placeholderId, { generationText: statusText, videoUrl: blobUrl });
+            });
+            updateMessage(placeholderId, { videoUrl: finalUrl, generationStatus: 'complete' });
+        } catch(error) {
+            updateMessage(placeholderId, { text: getAkbarErrorMessage(error), generationStatus: 'error' });
+            throw error; // Re-throw to be caught by the main handler
+        } finally {
+            // Final cleanup of the last preview blob URL
+            if (lastPreviewUrl) {
+                URL.revokeObjectURL(lastPreviewUrl);
             }
-            setRetryConfirmationMessage(null);
-          }}
-          onCancel={() => setRetryConfirmationMessage(null)}
-          confirmLabel="Ya, Kirim Ulang"
-        />
-      )}
-      {showClearConfirmation && (
-        <ConfirmationDialog
-          title="Hapus Riwayat Chat?"
-          message="Tindakan ini akan menghapus semua pesan secara permanen. Anda yakin?"
-          onConfirm={handleClearChat}
-          onCancel={() => setShowClearConfirmation(false)}
-          confirmLabel="Ya, Hapus"
-          cancelLabel="Batal"
-          confirmButtonClass="bg-red-600 hover:bg-red-700 focus:ring-red-500"
-        />
-      )}
-    </div>
-  );
+        }
+    };
+
+    const handleStyleSelect = async (style: string) => {
+        if (!pendingComicRequest) return;
+        setIsLoading(true);
+        try {
+            const session = startComicSession(pendingComicRequest.prompt, style);
+            const panelNumber = 1;
+            // FIX: Awaited generatePlaceholderImage as it returns a Promise<string> which is not assignable to imageUrl that expects a string.
+            const placeholderImageUrl = await generatePlaceholderImage('');
+            const placeholderId = addMessage({ role: 'model', isComicPanel: true, panelNumber, imageUrl: placeholderImageUrl, text: '', generationStatus: 'generating', generationText: `Memulai komik... Membuat panel #${panelNumber}...` });
+            const { imageUrl, narrative, imagePrompt } = await continueComic(session, pendingComicRequest.prompt);
+            updateMessage(placeholderId, { imageUrl, text: narrative, comicImagePrompt: imagePrompt, generationStatus: 'complete' });
+            setComicSession({ chat: session, panelCount: panelNumber, style });
+        } catch (error) {
+            addMessage({ role: 'model', text: getAkbarErrorMessage(error) });
+        } finally {
+            setPendingComicRequest(null);
+            setIsLoading(false);
+        }
+    };
+
+    const handleContextMenu = (event: React.MouseEvent, message: Message) => {
+        event.preventDefault();
+        setContextMenu({ x: event.clientX, y: event.clientY, message });
+    };
+
+    const handleRetry = (message: Message) => {
+        // Find the user message that prompted this response
+        // FIX: Replace findLastIndex with a for-loop for broader JS compatibility.
+        let userMessageIndex = -1;
+        for (let i = messages.length - 1; i >= 0; i--) {
+            if (messages[i].id < message.id && messages[i].role === 'user') {
+                userMessageIndex = i;
+                break;
+            }
+        }
+
+        if (userMessageIndex !== -1) {
+            const userMessage = messages[userMessageIndex];
+            // Remove the error message and all subsequent messages
+            setMessages(prev => prev.slice(0, messages.indexOf(message)));
+            // Resubmit
+            handleSubmit(userMessage.text || '', null); // Note: File attachments are not retried for simplicity
+        }
+        setContextMenu(null);
+    };
+
+    const handleSaveChat = () => {
+        const chatContent = messages.map(m => `[${m.role === 'user' ? 'User' : 'AKBAR AI'}]\n${m.text || '(media content)'}`).join('\n\n');
+        const blob = new Blob([chatContent], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        downloadFile(url, `akbar-ai-chat-${new Date().toISOString()}.txt`);
+        URL.revokeObjectURL(url);
+    };
+
+    const handleClearChat = () => {
+        setMessages([]);
+        setComicSession(null);
+        setDialog(null);
+        chatSession.current = createChatSession(aiStyle); // Reset session
+    };
+    
+    const handleEditComicSave = (messageId: string, newNarrative: string, newImageUrl: string) => {
+        updateMessage(messageId, { text: newNarrative, imageUrl: newImageUrl });
+        setEditingComic(null);
+    };
+    
+    const handleRegenerateComicImage = async (messageId: string): Promise<string> => {
+        const message = messages.find(m => m.id === messageId);
+        if (!message || !message.comicImagePrompt) {
+            throw new Error("Prompt gambar asli tidak ditemukan.");
+        }
+        const { imageUrl } = await generateImage(message.comicImagePrompt);
+        return imageUrl;
+    };
+
+
+    const contextMenuOptions = useMemo(() => {
+        if (!contextMenu) return [];
+        const { message } = contextMenu;
+        const options = [];
+
+        if (message.text) {
+            options.push({
+                label: 'Salin Teks',
+                icon: <CopyIcon className="w-4 h-4 mr-2" />,
+                action: () => {
+                    navigator.clipboard.writeText(stripMarkdown(message.text!));
+                    setContextMenu(null);
+                }
+            });
+        }
+        if (message.generationStatus === 'error') {
+            options.push({
+                label: 'Coba Lagi',
+                icon: <RetryIcon className="w-4 h-4 mr-2" />,
+                action: () => handleRetry(message)
+            });
+        }
+        return options;
+    }, [contextMenu, messages]);
+
+
+    // Render
+    return (
+        <div className="flex flex-col h-screen bg-gray-900 text-white font-sans">
+            <Header
+                isChatEmpty={messages.length === 0}
+                onSaveChat={handleSaveChat}
+                onRequestClearChat={() => setDialog('clearChat')}
+                aiStyle={aiStyle}
+                onStyleChange={(style) => {
+                    setAiStyle(style);
+                    // Reset non-sticky state when changing personality
+                    setComicSession(null); 
+                    setMessages([]);
+                }}
+                messages={messages}
+                activeImageFilter={activeImageFilter}
+                onImageFilterChange={setActiveImageFilter}
+            />
+            <main className="flex-1 overflow-y-auto p-4 md:p-6">
+                <div className="max-w-4xl mx-auto">
+                    {messages.length === 0 ? <WelcomeScreen /> : (
+                        <MessageList
+                            messages={filteredMessages}
+                            isLoading={isLoading}
+                            onContextMenu={handleContextMenu}
+                            animatedMessageId={animatedMessageId}
+                            onStyleSelect={handleStyleSelect}
+                            onEditComicRequest={(message) => setEditingComic(message)}
+                        />
+                    )}
+                </div>
+            </main>
+            <footer className="p-4 md:p-6 bg-gray-900/60 backdrop-blur-sm sticky bottom-0">
+                <div className="max-w-4xl mx-auto">
+                    <InputBar 
+                        onSubmit={handleSubmit} 
+                        isLoading={isLoading}
+                        isComicMode={!!comicSession}
+                    />
+                </div>
+            </footer>
+            {contextMenu && (
+                <ContextMenu
+                    x={contextMenu.x}
+                    y={contextMenu.y}
+                    options={contextMenuOptions}
+                    onClose={() => setContextMenu(null)}
+                />
+            )}
+            {dialog === 'clearChat' && (
+                <ConfirmationDialog
+                    title="Hapus Seluruh Percakapan?"
+                    message="Tindakan ini tidak bisa dibatalkan. Semua riwayat chat saat ini akan hilang."
+                    confirmLabel="Ya, Hapus Saja"
+                    confirmButtonClass="bg-red-600 hover:bg-red-700 focus:ring-red-500"
+                    onConfirm={handleClearChat}
+                    onCancel={() => setDialog(null)}
+                />
+            )}
+            {editingComic && (
+                <ComicEditorModal
+                    message={editingComic}
+                    onCancel={() => setEditingComic(null)}
+                    onSave={handleEditComicSave}
+                    onRegenerateImage={handleRegenerateComicImage}
+                />
+            )}
+        </div>
+    );
 };
 
 export default App;
