@@ -1,6 +1,4 @@
 
-
-
 import React from 'react';
 import { ImageIcon } from './ImageIcon';
 import { PaperclipIcon } from './icons/PaperclipIcon';
@@ -18,7 +16,7 @@ export const WelcomeScreen: React.FC = () => {
         <AkbarIcon className="w-24 h-24 text-purple-500 mb-6" />
       <h2 className="text-4xl font-bold text-gray-200 mb-2">AKBAR AI</h2>
       <p className="mb-8 max-w-lg">
-        Hantu di dalam sistem. Tanya apa aja, atau kasih perintah. Gue punya... opini.
+        Gue bukan asisten biasa. Ngobrol, suruh gue analisis gambar, atau ciptakan karya visual dari imajinasi liar lo. Coba aja kalau berani.
       </p>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 w-full max-w-5xl">
         <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700/50">

@@ -67,8 +67,9 @@
         animation: background-pan 10s linear infinite;
       }
       @keyframes blink-caret {
-        from, to { border-color: transparent }
-        50% { border-color: #a855f7; } /* purple-500 */
+        50% {
+          opacity: 0;
+        }
       }
       .typing-cursor::after {
         content: '_';

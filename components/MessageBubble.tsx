@@ -1,6 +1,5 @@
 
 
-
 import React from 'react';
 import { Message } from '../types';
 import { UserIcon } from './icons/UserIcon';
@@ -157,7 +156,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onContext
         )}
 
         {message.videoUrl && message.generationStatus === 'complete' && (
-             <div className="relative group mb-2 rounded-lg overflow-hidden max-w-sm">
+             <div className="relative group mb-2 rounded-lg overflow-hidden">
                 <video src={message.videoUrl} controls autoPlay loop muted className="w-full h-auto bg-black" />
                 {!isUser && (
                      <button
@@ -181,7 +180,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onContext
         )}
 
         {message.imageUrl && (
-          <div className="relative group mb-2 rounded-lg overflow-hidden max-w-sm">
+          <div className="relative group mb-2 rounded-lg overflow-hidden">
             <img src={message.imageUrl} alt="content" className="w-full h-auto" />
             {!isUser && (
                  <button

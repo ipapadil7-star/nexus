@@ -26,13 +26,13 @@ const randomHints = [
     "Contoh: /wallpaper pemandangan kota siberpunk --aspect 9:16",
     "Contoh: /dengarkan + lampirkan gambar",
     "Contoh: /gambar kota neon --style cyberpunk",
-    "Contoh: /gambar potret detail --quality 4 --style photorealistic",
+    "Contoh: /gambar potret detail --style photorealistic --aspect 3:4",
     "Contoh: /video robot kuno berjalan di hutan --aspect 9:16",
     "Contoh: /gambar kastil melayang --style fantasy",
     "Contoh: /placeholder AI Masa Depan --style futuristic --icon brain",
     "Contoh: /video kota bawah laut --res 1080p",
     "Contoh: /video balapan di luar angkasa --quality fast",
-    "Contoh: /gambar pemandangan fantasi --width 1920 --height 1080",
+    "Contoh: /gambar pemandangan fantasi --aspect 4:3",
     "Contoh: /gambar pahlawan super --style comicbook",
     "Contoh: /gambar potret lama --style vintage",
     "Contoh: /gambar sirkuit otak --style darkmode",
@@ -133,6 +133,20 @@ export const InputBar: React.FC<InputBarProps> = ({ onSubmit, isLoading, isComic
     textareaRef.current?.focus();
   };
 
+  const handleAspectSelect = (aspect: string) => {
+    let newPrompt = prompt;
+    const aspectRegex = /--aspect\s+(\S+)/;
+
+    if (aspectRegex.test(newPrompt)) {
+        newPrompt = newPrompt.replace(aspectRegex, `--aspect ${aspect}`);
+    } else {
+        newPrompt = `${newPrompt.trim()} --aspect ${aspect} `;
+    }
+    
+    setPrompt(newPrompt);
+    textareaRef.current?.focus();
+  };
+
   const placeholderText = isComicMode
     ? "Ketik 'lanjutkan' untuk panel berikutnya..."
     : attachedFile
@@ -141,8 +155,13 @@ export const InputBar: React.FC<InputBarProps> = ({ onSubmit, isLoading, isComic
 
   const showCommandHint = prompt.trim().toLowerCase() === '/gambar' || prompt.trim().toLowerCase() === '/video';
   const showStyleSelector = prompt.trim().toLowerCase().startsWith('/gambar') || prompt.trim().toLowerCase().startsWith('/komik');
+  
   const currentStyleMatch = prompt.match(/--style\s+(\S+)/);
   const currentStyle = currentStyleMatch ? currentStyleMatch[1].toLowerCase() : null;
+
+  const currentAspectMatch = prompt.match(/--aspect\s+(\S+)/);
+  const currentAspect = currentAspectMatch ? currentAspectMatch[1] : null;
+
   const isTyping = prompt.length > 0 && !isLoading;
 
   return (
@@ -189,25 +208,52 @@ export const InputBar: React.FC<InputBarProps> = ({ onSubmit, isLoading, isComic
           </div>
         )}
          {showStyleSelector && (
-          <div className="mb-2 animate-fade-in-slide-up">
-              <p className="text-xs text-gray-400 mb-2 px-1">Pilih gaya (opsional):</p>
-              <div className="flex overflow-x-auto space-x-2 pb-2">
-                  {allowedImageStyles.map(style => (
-                      <button 
-                          key={style}
-                          onClick={() => handleStyleSelect(style)}
-                          className={clsx(
-                              "px-3 py-1 text-sm rounded-full border transition-colors whitespace-nowrap",
-                              {
-                                  "bg-purple-600 border-purple-500 text-white": currentStyle === style,
-                                  "bg-gray-700/50 border-gray-600 text-gray-300 hover:bg-gray-600 hover:border-gray-500": currentStyle !== style,
-                              }
-                          )}
-                      >
-                         {style.charAt(0).toUpperCase() + style.slice(1)}
-                      </button>
-                  ))}
+          <div className="mb-2 animate-fade-in-slide-up space-y-3">
+              <div>
+                  <p className="text-xs text-gray-400 mb-2 px-1">Pilih gaya (opsional):</p>
+                  <div className="flex overflow-x-auto space-x-2 pb-2">
+                      {allowedImageStyles.map(style => (
+                          <button 
+                              key={style}
+                              onClick={() => handleStyleSelect(style)}
+                              className={clsx(
+                                  "px-3 py-1 text-sm rounded-full border transition-colors whitespace-nowrap",
+                                  {
+                                      "bg-purple-600 border-purple-500 text-white": currentStyle === style,
+                                      "bg-gray-700/50 border-gray-600 text-gray-300 hover:bg-gray-600 hover:border-gray-500": currentStyle !== style,
+                                  }
+                              )}
+                          >
+                            {style.charAt(0).toUpperCase() + style.slice(1)}
+                          </button>
+                      ))}
+                  </div>
               </div>
+              
+              {prompt.trim().toLowerCase().startsWith('/gambar') && (
+                <>
+                  <div>
+                      <p className="text-xs text-gray-400 mb-2 px-1">Rasio Aspek (opsional):</p>
+                      <div className="flex overflow-x-auto space-x-2 pb-2">
+                          {['1:1', '16:9', '9:16', '4:3', '3:4'].map(aspect => (
+                              <button 
+                                  key={aspect}
+                                  onClick={() => handleAspectSelect(aspect)}
+                                  className={clsx(
+                                      "px-3 py-1 text-sm rounded-full border transition-colors whitespace-nowrap",
+                                      {
+                                          "bg-purple-600 border-purple-500 text-white": currentAspect === aspect,
+                                          "bg-gray-700/50 border-gray-600 text-gray-300 hover:bg-gray-600 hover:border-gray-500": currentAspect !== aspect,
+                                      }
+                                  )}
+                              >
+                                  {aspect}
+                              </button>
+                          ))}
+                      </div>
+                  </div>
+                </>
+              )}
           </div>
         )}
         <div className="flex items-center gap-2">
@@ -250,7 +296,7 @@ export const InputBar: React.FC<InputBarProps> = ({ onSubmit, isLoading, isComic
         </div>
         {showCommandHint && (
           <div className="px-3 pt-2 text-xs text-gray-400">
-            <p>Ketik deskripsi... <span className="text-gray-500">{hint}</span></p>
+            <p>Ketik deskripsi... <span className="hidden sm:inline text-gray-500">{hint}</span></p>
           </div>
         )}
       </div>

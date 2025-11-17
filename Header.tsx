@@ -34,11 +34,13 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
     const [isSaved, setIsSaved] = useState(false);
     const [displayText, setDisplayText] = useState('');
+    const [isTyping, setIsTyping] = useState(true);
     const [isFilterPopoverOpen, setIsFilterPopoverOpen] = useState(false);
     const fullText = "AKBAR AI";
 
     useEffect(() => {
         let i = 0;
+        setIsTyping(true);
         setDisplayText(''); // Reset text on mount
         const intervalId = setInterval(() => {
             if (i < fullText.length) {
@@ -46,6 +48,7 @@ export const Header: React.FC<HeaderProps> = ({
                 i++;
             } else {
                 clearInterval(intervalId);
+                setIsTyping(false);
             }
         }, 150); // Typing speed
 
@@ -71,7 +74,10 @@ export const Header: React.FC<HeaderProps> = ({
     <header className="flex items-center justify-between p-4 bg-gray-900/60 backdrop-blur-sm sticky top-0 z-10">
        <div className="flex items-center">
             <AkbarIcon className="w-8 h-8 text-purple-400 mr-3" />
-            <h1 className="text-2xl font-bold tracking-wider text-purple-400 font-mono h-[32px] typing-cursor">
+            <h1 className={clsx(
+                "text-xl sm:text-2xl font-bold tracking-wider text-purple-400 font-mono h-[32px]",
+                { 'typing-cursor': isTyping }
+            )}>
                 {displayText}
             </h1>
        </div>
