@@ -1,5 +1,7 @@
 
 
+
+
 import React from 'react';
 import { Message } from '../types';
 import { UserIcon } from './icons/UserIcon';
@@ -8,11 +10,14 @@ import { DocumentIcon } from './icons/DocumentIcon';
 import { DownloadIcon } from './icons/DownloadIcon';
 import clsx from 'clsx';
 import { VideoIcon } from './icons/VideoIcon';
+import { Volume2Icon } from './icons/Volume2Icon';
 import { StyleSelector } from './StyleSelector';
 import { EditIcon } from './icons/EditIcon';
 import { FilePdfIcon } from './icons/FilePdfIcon';
 import { FileSlideIcon } from './icons/FileSlideIcon';
 import { FileSheetIcon } from './icons/FileSheetIcon';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 interface MessageBubbleProps {
   message: Message;
@@ -71,11 +76,11 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onContext
        <div className={clsx('flex items-end', { 'animate-fade-in-slide-up': isAnimated })}>
             <AkbarIcon className={`w-8 h-8 ${iconClasses} shrink-0 mb-2`} />
             <div className={clsx(
-                'max-w-xl lg:max-w-3xl rounded-2xl px-5 py-3 shadow-md',
+                'max-w-xl lg:max-w-3xl rounded-2xl rounded-bl-none px-5 py-3 shadow-md',
                 bubbleClasses
             )}>
                 {message.text && (
-                    <div className="prose prose-invert prose-sm whitespace-pre-wrap">{message.text}</div>
+                    <div className="prose prose-invert prose-sm max-w-none">{message.text}</div>
                 )}
                 <StyleSelector onSelect={onStyleSelect} isLoading={isLoading} />
             </div>
@@ -108,8 +113,10 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onContext
                 </div>
                 <div className="p-4 bg-gray-800/70 border-t-2 border-gray-600 flex items-end justify-between gap-4">
                     {message.text ? (
-                        <div className="prose prose-invert prose-sm text-gray-200 italic whitespace-pre-wrap flex-grow">
-                            {message.text}
+                        <div className="prose prose-invert prose-sm text-gray-200 italic flex-grow max-w-none">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: ({node, ...props}) => <a {...props} target="_blank" rel="noopener noreferrer" /> }}>
+                                {message.text}
+                            </ReactMarkdown>
                         </div>
                     ) : (
                         <div className="flex-grow"></div>
@@ -134,7 +141,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onContext
       {!isUser && <Icon className={`w-8 h-8 ${iconClasses} shrink-0 mb-2`} />}
       <div className={clsx(
         'max-w-xl lg:max-w-3xl rounded-2xl px-5 py-3 shadow-md',
-        bubbleClasses
+        bubbleClasses,
+        isUser ? 'rounded-br-none' : 'rounded-bl-none'
       )}>
         {message.generationStatus === 'generating' && (
             <div className="flex flex-col items-center justify-center bg-black/20 rounded-lg mb-2 p-4">
@@ -142,6 +150,13 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onContext
                     <div className="w-full">
                         <div className="text-xs text-center text-gray-400 italic mb-2 animate-pulse">PRATINJAU...</div>
                         <video src={message.videoUrl} autoPlay loop muted className="w-full h-auto bg-black rounded-md" />
+                    </div>
+                ) : message.generationText?.includes('audio') ? (
+                     <div className="flex flex-col items-center justify-center">
+                        <div className="relative">
+                            <Volume2Icon className="w-12 h-12 text-amber-400" />
+                            <div className="absolute inset-0 border-2 border-amber-500/50 rounded-full animate-pulse"></div>
+                        </div>
                     </div>
                 ) : (
                     <div className="flex flex-col items-center justify-center">
@@ -151,7 +166,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onContext
                         </div>
                     </div>
                 )}
-                <p className="mt-3 text-sm text-gray-300 italic">{message.generationText || "AKBAR AI sedang meracik videomu..."}</p>
+                <p className="mt-3 text-sm text-gray-300 italic">{message.generationText || "AKBAR AI sedang bekerja..."}</p>
             </div>
         )}
 
@@ -223,7 +238,11 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onContext
         )}
 
         {message.text && (
-           <div className="prose prose-invert prose-sm whitespace-pre-wrap">{message.text}</div>
+           <div className="prose prose-invert prose-sm max-w-none">
+                <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: ({node, ...props}) => <a {...props} target="_blank" rel="noopener noreferrer" /> }}>
+                    {message.text}
+                </ReactMarkdown>
+           </div>
         )}
       </div>
       {isUser && <Icon className={`w-8 h-8 ${iconClasses} shrink-0 mb-2`} />}

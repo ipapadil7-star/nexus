@@ -31,8 +31,14 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ x, y, options, onClose
   }, [onClose]);
 
   if (options.length === 0) {
+    onClose();
     return null;
   }
+
+  const handleActionClick = (action: () => void) => {
+    action();
+    onClose();
+  };
 
   return (
     <>
@@ -46,8 +52,8 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({ x, y, options, onClose
           {options.map((option, index) => (
             <li key={index}>
               <button
-                onClick={option.action}
-                className="w-full text-left px-3 py-1.5 text-sm text-gray-300 hover:bg-purple-600/50 flex items-center"
+                onClick={() => handleActionClick(option.action)}
+                className="w-full text-left px-3 py-1.5 text-sm text-gray-300 hover:bg-purple-600/50 flex items-center transition-colors"
               >
                 {option.icon}
                 {option.label}

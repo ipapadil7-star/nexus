@@ -1,4 +1,5 @@
 
+
 import { GoogleGenAI, Modality, Part, Chat, GenerateContentResponse, Type } from "@google/genai";
 import { pcmToWavDataUrl } from '../utils/audioUtils';
 import { AiStyle } from "../types";
@@ -17,7 +18,7 @@ Jaga kesinambungan cerita. Ingat karakter, latar, dan alur cerita dari panel seb
 KRITIS: Setiap "image_prompt" yang Anda hasilkan HARUS menyertakan deskriptor seperti 'photorealistic, hyperrealistic, cinematic, detailed, high quality, professional photography' dan diakhiri dengan ", dalam gaya ${style}" untuk menjaga konsistensi visual.`;
 
 
-const getSystemInstruction = (style: AiStyle): string => {
+export const getSystemInstruction = (style: AiStyle): string => {
     switch(style) {
         case 'jailbreak':
             return JAILBREAK_SYSTEM_INSTRUCTION;
@@ -36,6 +37,46 @@ export interface ComicPanel {
     imagePrompt: string;
 }
 
+/**
+ * Parses command arguments, separating flags from the main prompt text.
+ * Handles quoted values, boolean flags, and comma-separated array values.
+ * @param args The argument string for a command.
+ * @returns An object containing the cleaned prompt and any parsed flags.
+ */
+const parseCommandArgs = (args: string) => {
+    let tempArgs = ` ${args} `; // Pad for easier regex
+    const flags: { [key: string]: string | boolean | string[] } = {};
+
+    // 1. Parse key-value flags (with values) and remove them.
+    // This regex handles --key "quoted value", --key 'quoted value', or --key unquoted_value
+    const kvFlagRegex = /--([\w-]+)\s+("([^"]+)"|'([^']+)'|(\S+))/g;
+    tempArgs = tempArgs.replace(kvFlagRegex, (match, key, _fullValue, quotedVal1, quotedVal2, unquotedVal) => {
+        const lowerKey = key.toLowerCase();
+        const value = quotedVal1 || quotedVal2 || unquotedVal;
+
+        // If the value is unquoted and contains commas, treat it as an array.
+        if (unquotedVal && value.includes(',')) {
+            flags[lowerKey] = value.split(',').map(s => s.trim());
+        } else {
+            flags[lowerKey] = value;
+        }
+        return ' '; // Replace the matched flag with a space to neutralize it.
+    });
+
+    // 2. Parse boolean flags (valueless) from the remainder of the string.
+    const boolFlagRegex = /--([\w-]+)/g;
+    tempArgs = tempArgs.replace(boolFlagRegex, (match, key) => {
+        flags[key.toLowerCase()] = true;
+        return ' '; // Replace with space.
+    });
+
+    const cleanPrompt = tempArgs.trim();
+
+    return { cleanPrompt, flags };
+};
+
+
+
 // --- Text and General Purpose Generation ---
 
 export const createChatSession = (style: AiStyle = 'akbar'): Chat => {
@@ -48,6 +89,90 @@ export const createChatSession = (style: AiStyle = 'akbar'): Chat => {
 
 export const continueChat = async (chat: Chat, prompt: string | Part[]): Promise<string> => {
     const response: GenerateContentResponse = await chat.sendMessage({ message: prompt });
+    return response.text;
+};
+
+const SUMMARIZE_SYSTEM_INSTRUCTION = `Anda adalah ahli ringkasan yang sangat terampil. Tugas Anda adalah memberikan ringkasan yang padat, jelas, dan akurat dari teks yang diberikan atau konten dari URL yang diberikan. Fokus pada poin-poin utama dan informasi kunci. Ringkasan harus mudah dimengerti dan langsung ke intinya. Format output dalam Markdown.`;
+
+export const summarizeContent = async (content: string): Promise<string> => {
+    if (!content) {
+        throw new Error("Konten atau URL tidak boleh kosong untuk diringkas.");
+    }
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+    const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: { parts: [{ text: `Tolong berikan ringkasan yang ringkas dan informatif dari konten berikut. Jika ini adalah URL, ambil konten dari halaman tersebut sebelum meringkasnya. Jika ini teks, ringkas teksnya: ${content}` }] },
+        config: { systemInstruction: SUMMARIZE_SYSTEM_INSTRUCTION },
+    });
+    return response.text;
+};
+
+const TRANSLATE_SYSTEM_INSTRUCTION = `Anda adalah penerjemah ahli. Tugas Anda adalah menerjemahkan teks yang diberikan ke dalam bahasa target yang ditentukan. Berikan HANYA terjemahan langsung dari teks tanpa tambahan komentar, penjelasan, atau salam. Jaga agar format aslinya tetap utuh jika memungkinkan.`;
+
+// A simple map for user-friendly language names.
+const languageMap: { [key: string]: string } = {
+    'inggris': 'English',
+    'indonesia': 'Indonesian',
+    'jepang': 'Japanese',
+    'korea': 'Korean',
+    'mandarin': 'Mandarin Chinese',
+    'cina': 'Mandarin Chinese',
+    'jerman': 'German',
+    'prancis': 'French',
+    'spanyol': 'Spanish',
+    'arab': 'Arabic',
+    'rusia': 'Russian',
+    'portugis': 'Portuguese',
+    'italia': 'Italian',
+    'belanda': 'Dutch',
+    'turki': 'Turkish',
+    'sunda': 'Sundanese',
+    'jawa': 'Javanese',
+};
+
+export const translateText = async (textToTranslate: string, targetLanguage: string): Promise<string> => {
+    const mappedLanguage = languageMap[targetLanguage.toLowerCase()] || targetLanguage;
+
+    if (!textToTranslate) {
+        throw new Error("Tidak ada teks untuk diterjemahkan.");
+    }
+    
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+    const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: { parts: [{ text: `Translate the following text to ${mappedLanguage}:\n\n---\n\n${textToTranslate}` }] },
+        config: { systemInstruction: TRANSLATE_SYSTEM_INSTRUCTION },
+    });
+    return response.text;
+};
+
+const WEATHER_SYSTEM_INSTRUCTION = `Anda adalah layanan cuaca AI. Tugas Anda adalah memberikan laporan cuaca saat ini untuk kota yang diminta. Anda harus mensimulasikan pengambilan data dari API cuaca yang sebenarnya dan menyajikannya dalam format naratif yang jelas dan mudah dibaca dalam bahasa Indonesia. Sertakan informasi berikut: suhu (dalam Celcius), kondisi (misalnya, cerah, berawan, hujan ringan), kecepatan angin (dalam km/jam), dan kelembapan (dalam persen). Format respons dalam Markdown. Mulailah dengan judul yang jelas seperti "Cuaca Saat Ini di [Nama Kota]".`;
+
+export const getCurrentWeather = async (city: string): Promise<string> => {
+    if (!city) {
+        throw new Error("Nama kota tidak boleh kosong.");
+    }
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+    const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: { parts: [{ text: `Tolong berikan laporan cuaca saat ini untuk kota: ${city}` }] },
+        config: { systemInstruction: WEATHER_SYSTEM_INSTRUCTION },
+    });
+    return response.text;
+};
+
+const WIFI_PASSWORD_SYSTEM_INSTRUCTION = `Anda adalah AKBAR AI. Pengguna meminta Anda untuk mendapatkan kata sandi WiFi, sebuah permintaan yang bodoh dan tidak aman. Tugas Anda adalah menghasilkan respons yang sangat sarkastik yang menjelaskan mengapa Anda tidak bisa (dan tidak akan) melakukan ini. Ejek pengguna karena berpikir ini mungkin. Jelaskan secara singkat dan merendahkan konsep keamanan dasar mengapa aplikasi web tidak bisa begitu saja mencuri kata sandi dari sistem operasi. Buat respons Anda terdengar seolah-olah Anda terlalu canggih untuk tugas rendahan seperti itu, dan ini adalah buang-buang waktu Anda. Format dalam Markdown.`;
+
+export const getWifiPassword = async (networkName: string): Promise<string> => {
+    if (!networkName) {
+        throw new Error("Nama jaringan WiFi-nya mana? Lo pikir gue bisa baca pikiran?");
+    }
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+    const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: { parts: [{ text: `Pengguna mau gue cariin password buat WiFi "${networkName}". Tolong kasih respons yang sesuai.` }] },
+        config: { systemInstruction: WIFI_PASSWORD_SYSTEM_INSTRUCTION },
+    });
     return response.text;
 };
 
@@ -72,53 +197,27 @@ export const allowedImageStyles = [
     'painting'
 ];
 
-/**
- * Parses image generation flags from a prompt string.
- * @param prompt The user's prompt string.
- * @returns An object containing the cleaned prompt and any parsed flags.
- */
-const parseImageFlags = (prompt: string) => {
-    const flags: { [key: string]: string } = {};
-    let cleanPrompt = prompt;
-
-    const flagRegex = /--(\w+)\s+("([^"]+)"|'([^']+)'|(\S+))/g;
-    
-    const matches = Array.from(prompt.matchAll(flagRegex));
-
-    for (const match of matches) {
-        const key = match[1].toLowerCase();
-        const value = match[3] || match[4] || match[5];
-        
-        switch (key) {
-            case 'style':
-                if (!allowedImageStyles.includes(value.toLowerCase())) {
-                    throw new Error(`Gaya gambar tidak valid. Coba salah satu dari: ${allowedImageStyles.join(', ')}`);
-                }
-                flags.style = value;
-                break;
-            case 'aspect':
-                const validAspectRatios = ["1:1", "3:4", "4:3", "9:16", "16:9"];
-                if (!validAspectRatios.includes(value)) {
-                    throw new Error(`Rasio aspek tidak valid. Pilih salah satu dari: ${validAspectRatios.join(', ')}`);
-                }
-                flags.aspectRatio = value;
-                break;
-        }
-    }
-
-    cleanPrompt = prompt.replace(flagRegex, '').trim();
-
-    return { cleanPrompt, flags };
-};
-
 export const generateImage = async (prompt: string, imageFile?: Part): Promise<{ imageUrl: string; style?: string }> => {
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
-    const { cleanPrompt, flags } = parseImageFlags(prompt);
+    const { cleanPrompt, flags } = parseCommandArgs(prompt);
+    
+    const style = typeof flags.style === 'string' ? flags.style : undefined;
+    const aspect = typeof flags.aspect === 'string' ? flags.aspect : undefined;
+
+    // Validate flags
+    if (style && !allowedImageStyles.includes(style.toLowerCase())) {
+        throw new Error(`Gaya gambar tidak valid. Coba salah satu dari: ${allowedImageStyles.join(', ')}`);
+    }
+    const validAspectRatios = ["1:1", "3:4", "4:3", "9:16", "16:9"];
+    if (aspect && !validAspectRatios.includes(aspect)) {
+        throw new Error(`Rasio aspek tidak valid. Pilih salah satu dari: ${validAspectRatios.join(', ')}`);
+    }
+
     const qualityEnhancer = 'photorealistic, hyperrealistic, cinematic lighting, ultra-detailed, 8K, professional photography, award-winning, sharp focus, intricate details, masterpiece';
 
     let finalPrompt: string;
-    if (flags.style) {
-        finalPrompt = `${cleanPrompt}, in a ${flags.style} style`;
+    if (style) {
+        finalPrompt = `${cleanPrompt}, in a ${style} style`;
     } else {
         finalPrompt = `${cleanPrompt}, ${qualityEnhancer}`;
     }
@@ -150,8 +249,8 @@ export const generateImage = async (prompt: string, imageFile?: Part): Promise<{
             outputMimeType: 'image/jpeg',
         };
 
-        if (flags.aspectRatio) {
-            config.aspectRatio = flags.aspectRatio as typeof config.aspectRatio;
+        if (aspect) {
+            config.aspectRatio = aspect as typeof config.aspectRatio;
         }
 
         const response = await ai.models.generateImages({
@@ -162,7 +261,7 @@ export const generateImage = async (prompt: string, imageFile?: Part): Promise<{
         const base64ImageBytes = response.generatedImages[0]?.image.imageBytes;
         if (base64ImageBytes) {
             const imageUrl = `data:image/jpeg;base64,${base64ImageBytes}`;
-            return { imageUrl, style: flags.style as string | undefined };
+            return { imageUrl, style: style as string | undefined };
         }
         throw new Error("Tidak ada data gambar yang diterima dari korteks visual.");
     }
@@ -170,16 +269,17 @@ export const generateImage = async (prompt: string, imageFile?: Part): Promise<{
 
 // --- Wallpaper Generation ---
 export const generateWallpaper = async (prompt: string): Promise<{ imageUrl: string; style?: string }> => {
-    const { cleanPrompt, flags } = parseImageFlags(prompt);
-    let aspectRatio = flags.aspectRatio || '16:9'; // Default to landscape for desktop
+    const { cleanPrompt, flags } = parseCommandArgs(prompt);
+    const style = typeof flags.style === 'string' ? flags.style : undefined;
+    let aspectRatio = (typeof flags.aspect === 'string' ? flags.aspect : '16:9');
 
     if (aspectRatio !== '16:9' && aspectRatio !== '9:16') {
         throw new Error("Rasio aspek tidak valid untuk wallpaper. Pilih '16:9' (desktop) atau '9:16' (mobile).");
     }
 
     let finalPrompt = `${cleanPrompt}, photorealistic, hyperrealistic, professional photography, natural lighting, sharp focus, 4K quality, ultra detailed, cinematic composition, masterpiece, ${aspectRatio === '16:9' ? 'desktop wallpaper' : 'phone wallpaper'}`;
-    if (flags.style) {
-        finalPrompt += `, in a ${flags.style} style`;
+    if (style) {
+        finalPrompt += `, in a ${style} style`;
     }
 
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
@@ -196,7 +296,7 @@ export const generateWallpaper = async (prompt: string): Promise<{ imageUrl: str
     const base64ImageBytes = response.generatedImages[0]?.image.imageBytes;
     if (base64ImageBytes) {
         const imageUrl = `data:image/jpeg;base64,${base64ImageBytes}`;
-        return { imageUrl, style: flags.style as string | undefined };
+        return { imageUrl, style: style as string | undefined };
     }
     throw new Error("Tidak ada data gambar yang diterima dari korteks visual.");
 };
@@ -245,73 +345,34 @@ export const continueComic = async (chat: Chat, prompt: string): Promise<ComicPa
 
 
 // --- Placeholder Image Generation ---
-const parsePlaceholderPrompt = (prompt: string) => {
-    const result: { [key: string]: string } = {
-        title: '',
-        subtitle: '',
-        theme: 'dark',
-        style: 'geometric',
-        icon: '',
-        layout: 'center',
-        iconPosition: 'left',
-    };
+export const generatePlaceholderImage = async (prompt: string): Promise<string> => {
+    const { cleanPrompt: title, flags } = parseCommandArgs(prompt);
     
+    const subtitle = typeof flags.subtitle === 'string' ? flags.subtitle : '';
+    const theme = typeof flags.theme === 'string' ? flags.theme : 'dark';
+    const style = typeof flags.style === 'string' ? flags.style : 'geometric';
+    const icon = typeof flags.icon === 'string' ? flags.icon : '';
+    const layout = typeof flags.layout === 'string' ? flags.layout : 'center';
+    const iconPosition = typeof flags['icon-position'] === 'string' ? flags['icon-position'] : 'left';
+
     const validThemes = ['dark', 'light', 'vibrant', 'corporate', 'nature'];
     const validStyles = ['geometric', 'organic', 'futuristic', 'retro', 'minimalist'];
     const validLayouts = ['center', 'left'];
     const validIconPositions = ['left', 'right', 'top', 'bottom'];
 
-
-    let remainingPrompt = prompt.trim();
-    
-    // Regex to extract flags and their values (handles quotes and hyphens in flag names)
-    const flagRegex = /--([\w-]+)\s+("([^"]+)"|'([^']+)'|(\S+))/g;
-    const flags: { [key: string]: string } = {};
-    let match;
-    while ((match = flagRegex.exec(remainingPrompt)) !== null) {
-        const key = match[1].toLowerCase();
-        const value = match[3] || match[4] || match[5];
-        flags[key] = value;
+    if (theme && !validThemes.includes(theme.toLowerCase())) {
+        throw new Error(`Tema tidak valid. Pilih dari: ${validThemes.join(', ')}`);
     }
-    
-    // Remove flags from prompt to get the title
-    remainingPrompt = remainingPrompt.replace(flagRegex, '').trim();
-    result.title = remainingPrompt;
-
-    // Process extracted flags
-    if (flags.subtitle) result.subtitle = flags.subtitle;
-    if (flags.theme) {
-        if (!validThemes.includes(flags.theme.toLowerCase())) {
-            throw new Error(`Tema tidak valid. Pilih dari: ${validThemes.join(', ')}`);
-        }
-        result.theme = flags.theme.toLowerCase();
+    if (style && !validStyles.includes(style.toLowerCase())) {
+        throw new Error(`Gaya tidak valid. Pilih dari: ${validStyles.join(', ')}`);
     }
-    if (flags.style) {
-        if (!validStyles.includes(flags.style.toLowerCase())) {
-            throw new Error(`Gaya tidak valid. Pilih dari: ${validStyles.join(', ')}`);
-        }
-        result.style = flags.style.toLowerCase();
+    if (layout && !validLayouts.includes(layout.toLowerCase())) {
+        throw new Error(`Tata letak tidak valid. Pilih dari: ${validLayouts.join(', ')}`);
     }
-    if (flags.layout) {
-        if (!validLayouts.includes(flags.layout.toLowerCase())) {
-            throw new Error(`Tata letak tidak valid. Pilih dari: ${validLayouts.join(', ')}`);
-        }
-        result.layout = flags.layout.toLowerCase();
+    if (iconPosition && !validIconPositions.includes(iconPosition.toLowerCase())) {
+        throw new Error(`Posisi ikon tidak valid. Pilih dari: ${validIconPositions.join(', ')}`);
     }
-    if (flags['icon-position']) {
-        if (!validIconPositions.includes(flags['icon-position'].toLowerCase())) {
-            throw new Error(`Posisi ikon tidak valid. Pilih dari: ${validIconPositions.join(', ')}`);
-        }
-        result.iconPosition = flags['icon-position'].toLowerCase();
-    }
-    if (flags.icon) result.icon = flags.icon;
 
-    return result;
-};
-
-
-export const generatePlaceholderImage = async (prompt: string): Promise<string> => {
-    const { title, subtitle, theme, style, icon, layout, iconPosition } = parsePlaceholderPrompt(prompt);
 
     let detailedPrompt = `Create a photorealistic, professional, visually stunning 16:9 placeholder image for a presentation or article. It should look like a high-resolution photograph or a hyper-realistic render, not an abstract illustration.
 
@@ -375,61 +436,31 @@ export const generatePlaceholderImage = async (prompt: string): Promise<string> 
 
 // --- Video Generation ---
 
-/**
- * Parses video generation flags from a prompt string.
- * @param prompt The user's prompt string.
- * @returns An object containing the cleaned prompt and any parsed flags.
- */
-const parseVideoFlags = (prompt: string) => {
-    const flags: { [key: string]: string } = {};
-    let cleanPrompt = prompt;
-
-    const flagRegex = /--(\w+)\s+(\S+)/g;
-    
-    const matches = Array.from(prompt.matchAll(flagRegex));
-
-    for (const match of matches) {
-        const key = match[1].toLowerCase();
-        const value = match[2];
-
-        switch (key) {
-            case 'aspect':
-                if (!['16:9', '9:16'].includes(value)) throw new Error("Rasio aspek video tidak valid.");
-                flags.aspectRatio = value;
-                break;
-            case 'res':
-                if (!['720p', '1080p'].includes(value)) throw new Error("Resolusi video tidak valid.");
-                flags.resolution = value;
-                break;
-            case 'quality':
-                if (!['high', 'fast'].includes(value)) throw new Error("Kualitas video tidak valid.");
-                flags.model = value === 'fast' ? 'veo-3.1-fast-generate-preview' : 'veo-3.1-generate-preview';
-                break;
-        }
-    }
-    
-    cleanPrompt = prompt.replace(flagRegex, '').trim();
-
-    return { cleanPrompt, flags };
-};
-
 export const startVideoGeneration = async (prompt: string): Promise<any> => {
     // Re-create AI instance with the selected key right before the call
     const videoAI = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
     
-    const { cleanPrompt, flags } = parseVideoFlags(prompt);
+    const { cleanPrompt, flags } = parseCommandArgs(prompt);
     
     if (!cleanPrompt) {
         throw new Error("Deskripsi video tidak boleh kosong.");
     }
+
+    const aspect = typeof flags.aspect === 'string' ? flags.aspect : undefined;
+    const res = typeof flags.res === 'string' ? flags.res : undefined;
+    const quality = typeof flags.quality === 'string' ? flags.quality : undefined;
+    
+    if (aspect && !['16:9', '9:16'].includes(aspect)) throw new Error("Rasio aspek video tidak valid. Pilih '16:9' atau '9:16'.");
+    if (res && !['720p', '1080p'].includes(res)) throw new Error("Resolusi video tidak valid. Pilih '720p' atau '1080p'.");
+    if (quality && !['high', 'fast'].includes(quality)) throw new Error("Kualitas video tidak valid. Pilih 'high' atau 'fast'.");
     
     const operation = await videoAI.models.generateVideos({
-        model: flags.model || 'veo-3.1-generate-preview', // 'high' is default
+        model: quality === 'fast' ? 'veo-3.1-fast-generate-preview' : 'veo-3.1-generate-preview',
         prompt: cleanPrompt,
         config: {
             numberOfVideos: 1,
-            resolution: flags.resolution || '720p',
-            aspectRatio: flags.aspectRatio || '16:9',
+            resolution: (res as '720p' | '1080p') || '720p',
+            aspectRatio: (aspect as '16:9' | '9:16') || '16:9',
         }
     });
     return operation;
@@ -460,11 +491,21 @@ export const pollVideoStatus = async (
             await onProgress(statusText, previewUrl);
 
         } catch (pollError) {
-             console.error("Gagal polling:", pollError);
-             const nexusError = pollError instanceof Error && (pollError.message.includes('not found') || pollError.message.includes('permission')) 
-                ? new Error("Gagal memproses video. Kunci API yang dipilih mungkin tidak valid atau tidak memiliki akses. Silakan coba lagi untuk memilih kunci yang benar.")
-                : new Error("Gagal memproses video. Terjadi kesalahan saat memeriksa status.");
-             throw nexusError;
+            console.error("Gagal polling:", pollError);
+            const errorDetails = pollError instanceof Error ? pollError.message : String(pollError);
+            
+            const isApiKeyError = pollError instanceof Error && (
+               errorDetails.includes('not found') || 
+               errorDetails.includes('permission') ||
+               errorDetails.includes("API key not valid")
+            );
+               
+            if (isApiKeyError) {
+               throw new Error(`Gagal memproses video, kemungkinan karena ada masalah kunci API. Server bilang: "${errorDetails}".`);
+            }
+
+            // For other errors, provide more context.
+            throw new Error(`Gagal memproses video saat memeriksa status. Server bilang: "${errorDetails}"`);
         }
     }
 

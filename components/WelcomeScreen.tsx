@@ -1,4 +1,9 @@
 
+
+
+
+
+
 import React from 'react';
 import { ImageIcon } from './ImageIcon';
 import { PaperclipIcon } from './icons/PaperclipIcon';
@@ -9,6 +14,13 @@ import { TemplateIcon } from './icons/TemplateIcon';
 import { BookOpenIcon } from './icons/BookOpenIcon';
 import { WallpaperIcon } from './icons/WallpaperIcon';
 import { FilePlusIcon } from './icons/FilePlusIcon';
+import { FileSlideIcon } from './icons/FileSlideIcon';
+import { TerminalIcon } from './icons/TerminalIcon';
+import { AlignLeftIcon } from './icons/AlignLeftIcon';
+import { BrushIcon } from './icons/BrushIcon';
+import { TranslateIcon } from './icons/TranslateIcon';
+import { WeatherIcon } from './icons/WeatherIcon';
+import { WifiIcon } from './icons/WifiIcon';
 
 export const WelcomeScreen: React.FC = () => {
   return (
@@ -31,7 +43,14 @@ export const WelcomeScreen: React.FC = () => {
             <ImageIcon className="w-5 h-5 mr-2 text-cyan-400"/>
             Buat Gambar
           </h3>
-          <p className="text-sm">Gunakan <code className="bg-gray-700 rounded px-1.5 py-1 text-xs font-mono">/gambar</code>. Tambahkan flag seperti <code className="bg-gray-700 rounded px-1.5 py-1 text-xs font-mono">--style vaporwave</code>.</p>
+          <p className="text-sm">Gunakan <code className="bg-gray-700 rounded px-1.5 py-1 text-xs font-mono">/gambar</code>. Tambahkan flag seperti <code className="bg-gray-700 rounded px-1.5 py-1 text-xs font-mono">--style vaporwave</code> atau <code className="bg-gray-700 rounded px-1.5 py-1 text-xs font-mono">--aspect 16:9</code>.</p>
+        </div>
+         <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700/50">
+          <h3 className="font-semibold text-gray-200 flex items-center mb-2">
+            <BrushIcon className="w-5 h-5 mr-2 text-pink-400"/>
+            Gambar (Imagen 2)
+          </h3>
+          <p className="text-sm">Gunakan <code className="bg-gray-700 rounded px-1.5 py-1 text-xs font-mono">/draw</code> untuk model canggih. Mendukung semua flag dari <code className="bg-gray-700 rounded px-1.5 py-1 text-xs font-mono">/gambar</code>.</p>
         </div>
         <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700/50">
            <h3 className="font-semibold text-gray-200 flex items-center mb-2">
@@ -68,12 +87,54 @@ export const WelcomeScreen: React.FC = () => {
           </h3>
           <p className="text-sm">Gunakan <code className="bg-gray-700 rounded px-1.5 py-1 text-xs font-mono">/dengarkan</code> dan lampirkan gambar untuk mendengar deskripsi.</p>
         </div>
+         <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700/50">
+          <h3 className="font-semibold text-gray-200 flex items-center mb-2">
+            <AlignLeftIcon className="w-5 h-5 mr-2 text-blue-400"/>
+            Ringkas Konten
+          </h3>
+          <p className="text-sm">Gunakan <code className="bg-gray-700 rounded px-1.5 py-1 text-xs font-mono">/summarize</code> diikuti dengan teks atau URL untuk mendapatkan ringkasan singkat.</p>
+        </div>
+        <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700/50">
+          <h3 className="font-semibold text-gray-200 flex items-center mb-2">
+            <TranslateIcon className="w-5 h-5 mr-2 text-purple-400"/>
+            Terjemahkan Teks
+          </h3>
+          <p className="text-sm">Gunakan <code className="bg-gray-700 rounded px-1.5 py-1 text-xs font-mono">/translate &lt;bhs&gt; [id]</code> untuk menerjemahkan pesan terakhir atau pesan dengan ID.</p>
+        </div>
+         <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700/50">
+          <h3 className="font-semibold text-gray-200 flex items-center mb-2">
+            <WeatherIcon className="w-5 h-5 mr-2 text-yellow-300"/>
+            Cek Cuaca
+          </h3>
+          <p className="text-sm">Gunakan <code className="bg-gray-700 rounded px-1.5 py-1 text-xs font-mono">/cuaca &lt;kota&gt;</code> untuk mendapatkan laporan cuaca terkini di lokasi tersebut.</p>
+        </div>
+        <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700/50">
+            <h3 className="font-semibold text-gray-200 flex items-center mb-2">
+                <WifiIcon className="w-5 h-5 mr-2 text-green-300"/>
+                Lihat Password WiFi
+            </h3>
+            <p className="text-sm">Gunakan <code className="bg-gray-700 rounded px-1.5 py-1 text-xs font-mono">/wifipass &lt;nama_wifi&gt;</code> untuk menampilkan kata sandi yang tersimpan.</p>
+        </div>
         <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700/50">
           <h3 className="font-semibold text-gray-200 flex items-center mb-2">
             <FilePlusIcon className="w-5 h-5 mr-2 text-lime-400"/>
             Buat Dokumen
           </h3>
           <p className="text-sm">Gunakan <code className="bg-gray-700 rounded px-1.5 py-1 text-xs font-mono">/buatdok &lt;format&gt;</code>. Format: <code className="bg-gray-700 rounded px-1.5 py-1 text-xs font-mono">pdf</code>, <code className="bg-gray-700 rounded px-1.5 py-1 text-xs font-mono">slide</code>, <code className="bg-gray-700 rounded px-1.5 py-1 text-xs font-mono">sheet</code>.</p>
+        </div>
+         <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700/50">
+            <h3 className="font-semibold text-gray-200 flex items-center mb-2">
+                <FileSlideIcon className="w-5 h-5 mr-2 text-orange-400"/>
+                Buat Presentasi
+            </h3>
+            <p className="text-sm">Gunakan <code className="bg-gray-700 rounded px-1.5 py-1 text-xs font-mono">/createpresentation</code> dengan topik Anda untuk membuat file .pptx secara otomatis.</p>
+        </div>
+         <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700/50">
+          <h3 className="font-semibold text-gray-200 flex items-center mb-2">
+            <TerminalIcon className="w-5 h-5 mr-2 text-gray-400"/>
+            Terminal Shell
+          </h3>
+          <p className="text-sm">Gunakan <code className="bg-gray-700 rounded px-1.5 py-1 text-xs font-mono">/commandline</code> untuk membuka terminal interaktif dan menjalankan perintah shell.</p>
         </div>
       </div>
     </div>

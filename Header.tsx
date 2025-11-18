@@ -9,6 +9,7 @@ import { StyleSwitcher } from './components/StyleSwitcher';
 import { AiStyle, Message } from './types';
 import { ImageFilterPopover } from './components/ImageFilterPopover';
 import { FilterIcon } from './components/icons/FilterIcon';
+import { BrainIcon } from './components/icons/BrainIcon';
 
 
 interface HeaderProps {
@@ -20,6 +21,7 @@ interface HeaderProps {
     messages: Message[];
     activeImageFilter: string | null;
     onImageFilterChange: (style: string | null) => void;
+    onShowPrompt: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({ 
@@ -30,7 +32,8 @@ export const Header: React.FC<HeaderProps> = ({
     onStyleChange,
     messages,
     activeImageFilter,
-    onImageFilterChange 
+    onImageFilterChange,
+    onShowPrompt
 }) => {
     const [isSaved, setIsSaved] = useState(false);
     const [displayText, setDisplayText] = useState('');
@@ -83,6 +86,13 @@ export const Header: React.FC<HeaderProps> = ({
        </div>
        <div className="flex items-center gap-2">
             <StyleSwitcher currentStyle={aiStyle} onStyleChange={onStyleChange} />
+             <button 
+                onClick={onShowPrompt}
+                title="Lihat System Prompt"
+                className="icon-button-glow p-2 rounded-full text-purple-300 hover:bg-purple-500/20 hover:text-purple-200"
+            >
+                <BrainIcon className="w-5 h-5" />
+            </button>
             <div className="w-px h-6 bg-gray-700 mx-2"></div>
 
              {availableImageStyles.length > 0 && (
@@ -91,7 +101,7 @@ export const Header: React.FC<HeaderProps> = ({
                         onClick={() => setIsFilterPopoverOpen(prev => !prev)}
                         title="Filter Gambar Berdasarkan Gaya"
                         className={clsx(
-                            "p-2 rounded-full transition-colors",
+                            "icon-button-glow p-2 rounded-full",
                             {
                                 "bg-purple-500/30 text-purple-200": activeImageFilter,
                                 "text-purple-300 hover:bg-purple-500/20 hover:text-purple-200": !activeImageFilter
@@ -118,9 +128,9 @@ export const Header: React.FC<HeaderProps> = ({
             <button 
                 onClick={handleSaveClick}
                 disabled={isChatEmpty || isSaved}
-                title={isSaved ? "Tersimpan!" : "Simpan Chat"}
+                title={isSaved ? "Tersimpan!" : "Simpan Percakapan Saat Ini"}
                 className={clsx(
-                    "p-2 rounded-full transition-all duration-200",
+                    "icon-button-glow p-2 rounded-full",
                     "disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent",
                     {
                         'text-purple-300 hover:bg-purple-500/20 hover:text-purple-200': !isSaved,
@@ -134,7 +144,7 @@ export const Header: React.FC<HeaderProps> = ({
                 onClick={onRequestClearChat}
                 disabled={isChatEmpty}
                 title="Hapus Chat"
-                className="p-2 rounded-full text-red-400 hover:bg-red-500/20 hover:text-red-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                className="icon-button-glow p-2 rounded-full text-red-400 hover:bg-red-500/20 hover:text-red-300 disabled:opacity-40 disabled:cursor-not-allowed"
             >
                 <TrashIcon className="w-5 h-5" />
             </button>

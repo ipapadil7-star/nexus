@@ -9,6 +9,11 @@ export interface FileInfo {
   url: string; // Blob URL
 }
 
+export interface CustomCommand {
+  name: string;
+  text: string;
+}
+
 export interface Message {
   id: string;
   role: Role;

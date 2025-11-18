@@ -5,10 +5,10 @@ import { InputBar } from './components/InputBar';
 import { MessageList } from './components/MessageList';
 import { Header } from './Header';
 import { WelcomeScreen } from './components/WelcomeScreen';
-import { Message, Role, FileInfo, AiStyle } from './types';
-import { createChatSession, continueChat, generateImage, startVideoGeneration, pollVideoStatus, generateImageAudioDescription, generatePlaceholderImage, startComicSession, continueComic, allowedImageStyles, generateWallpaper, generateDocument } from './services/geminiService';
+import { Message, Role, FileInfo, AiStyle, CustomCommand } from './types';
+import { createChatSession, continueChat, generateImage, startVideoGeneration, pollVideoStatus, generateImageAudioDescription, generatePlaceholderImage, startComicSession, continueComic, allowedImageStyles, generateWallpaper, generateDocument, summarizeContent, translateText, getCurrentWeather, getWifiPassword } from './services/geminiService';
 import type { Chat, ComicPanel } from './services/geminiService';
-import { fileToBase64, getMimeType, downloadFile } from './utils/fileUtils';
+import { fileToBase64, getMimeType, downloadFile, downloadImageWithMetadata } from './utils/fileUtils';
 import { ContextMenu } from './components/ContextMenu';
 import { CopyIcon } from './components/icons/CopyIcon';
 import { RetryIcon } from './components/icons/RetryIcon';
@@ -19,9 +19,13 @@ import { LinkIcon } from './components/icons/LinkIcon';
 import { ImageIcon } from './components/ImageIcon';
 import { ComicEditorModal } from './components/ComicEditorModal';
 import { CheckIcon } from './components/icons/CheckIcon';
-// FIX: Import missing DownloadIcon component.
 import { DownloadIcon } from './components/icons/DownloadIcon';
 import { Part } from '@google/genai';
+import { SystemPromptModal } from './components/SystemPromptModal';
+import { EditIcon } from './components/icons/EditIcon';
+import { ExamplePrompts } from './components/ExamplePrompts';
+import { FilePlusIcon } from './components/icons/FilePlusIcon';
+import { Terminal } from './components/Terminal';
 
 interface ComicSession {
     chat: Chat;
@@ -41,7 +45,7 @@ interface PendingComicRequest {
 const stripMarkdown = (text: string): string => {
   return text
     .replace(/(!\[.*?\]\(.*?\))/g, '') // Remove images
-    .replace(/(\[.*?\]\(.*?\))/g, '$1') // Keep link text
+    .replace(/\[(.*?)\]\((.*?)\)/g, '$1 ($2)') // Convert links to "text (url)"
     .replace(/([*_`~#>])/g, '') // Remove other markdown symbols
     .replace(/\s+/g, ' ') // Collapse whitespace
     .trim();
@@ -61,18 +65,27 @@ const getAkbarErrorMessage = (error: unknown): string => {
     return message;
 };
 
+type ConfirmationRequest =
+  | { type: 'clearChat' }
+  | { type: 'styleChange'; style: AiStyle }
+  | { type: 'deleteCommand'; commandName: string }
+  | { type: 'overwriteCommand'; command: { name: string; text: string } };
+
 const App: React.FC = () => {
     // State management
     const [messages, setMessages] = useState<Message[]>([]);
     const [isLoading, setIsLoading] = useState(false);
     const [aiStyle, setAiStyle] = useState<AiStyle>('akbar');
-    const [contextMenu, setContextMenu] = useState<{ x: number; y: number; message: Message } | null>(null);
-    const [dialog, setDialog] = useState<'clearChat' | null>(null);
+    const [contextMenu, setContextMenu] = useState<{ x: number; y: number; message: Message; options: { label: string; action: () => void; icon: React.ReactNode }[] } | null>(null);
+    const [confirmationRequest, setConfirmationRequest] = useState<ConfirmationRequest | null>(null);
     const [animatedMessageId, setAnimatedMessageId] = useState<string | null>(null);
     const [comicSession, setComicSession] = useState<ComicSession | null>(null);
     const [pendingComicRequest, setPendingComicRequest] = useState<PendingComicRequest | null>(null);
     const [editingComic, setEditingComic] = useState<Message | null>(null);
     const [activeImageFilter, setActiveImageFilter] = useState<string | null>(null);
+    const [isPromptModalOpen, setIsPromptModalOpen] = useState(false);
+    const [customCommands, setCustomCommands] = useState<CustomCommand[]>([]);
+    const [isTerminalOpen, setIsTerminalOpen] = useState(false);
 
     // Refs
     const chatSession = useRef<Chat | null>(null);
@@ -91,6 +104,31 @@ const App: React.FC = () => {
     useEffect(() => {
         chatSession.current = createChatSession(aiStyle);
     }, [aiStyle]);
+
+    // Load custom commands from local storage on mount
+    useEffect(() => {
+        try {
+            const saved = localStorage.getItem('akbar_custom_commands');
+            if (saved) {
+                const parsed = JSON.parse(saved);
+                if (Array.isArray(parsed) && parsed.every(c => typeof c.name === 'string' && typeof c.text === 'string')) {
+                    setCustomCommands(parsed);
+                }
+            }
+        } catch (e) {
+            console.error("Failed to load custom commands from localStorage", e);
+        }
+    }, []);
+
+    // Save custom commands to local storage when they change
+    useEffect(() => {
+        try {
+            localStorage.setItem('akbar_custom_commands', JSON.stringify(customCommands));
+        } catch (e) {
+            console.error("Failed to save custom commands to localStorage", e);
+        }
+    }, [customCommands]);
+
 
     // Helper functions
     const addMessage = (message: Omit<Message, 'id'>) => {
@@ -121,10 +159,106 @@ const App: React.FC = () => {
     };
 
     const handleSendMessage = async (prompt: string, file: File | null) => {
+        let finalPrompt = prompt;
+        const commandMatchSimple = finalPrompt.trim().match(/^\/(\w+)/);
+        if (commandMatchSimple) {
+            const customCmd = customCommands.find(c => c.name.toLowerCase() === commandMatchSimple[1].toLowerCase());
+            if (customCmd) {
+                finalPrompt = customCmd.text;
+            }
+        }
+
+        // Handle client-side commands that don't need an AI roundtrip
+        if (commandMatchSimple) {
+            const [, command, args] = prompt.trim().match(/^\/(\w+)\s*(.*)/) || [];
+
+             if (command.toLowerCase() === 'commandline') {
+                setIsTerminalOpen(true);
+                return;
+            }
+            
+            if (command.toLowerCase() === 'edit') {
+                let panelToEdit: Message | undefined;
+                if (args) {
+                    panelToEdit = messages.find(m => m.id === args.trim() && m.isComicPanel);
+                } else {
+                    panelToEdit = [...messages].reverse().find(m => m.isComicPanel);
+                }
+
+                if (panelToEdit) {
+                    handleEditComicRequest(panelToEdit);
+                } else {
+                    const errorText = args
+                        ? `Panel komik dengan ID itu gak ada, woy.`
+                        : `Gak ada panel komik terakhir buat diedit.`;
+                    const errorId = addMessage({ role: 'model', text: errorText, generationStatus: 'error' });
+                    setTimeout(() => setMessages(prev => prev.filter(m => m.id !== errorId)), 4000);
+                }
+                return; 
+            }
+
+            if (command.toLowerCase() === 'perintahku') {
+                const subCommandArgs = args.trim().split(/\s+/);
+                const subCommand = subCommandArgs[0]?.toLowerCase();
+                const name = subCommandArgs[1];
+                const textMatch = args.match(/"(.*?)"/);
+                const text = textMatch ? textMatch[1] : '';
+
+                addMessage({ role: 'user', text: prompt }); 
+                
+                let responseText = '';
+
+                switch (subCommand) {
+                    case 'tambah':
+                        if (name && text) {
+                            if (/^[a-zA-Z0-9_]+$/.test(name) && name.length <= 20) {
+                                const existingCommand = customCommands.find(c => c.name.toLowerCase() === name.toLowerCase());
+                                if (existingCommand) {
+                                    setConfirmationRequest({ type: 'overwriteCommand', command: { name, text } });
+                                    return; // Wait for user confirmation
+                                }
+                                setCustomCommands(prev => [...prev, { name, text }]);
+                                responseText = `Sip, perintah \`/${name}\` udah gue simpen.`;
+                            } else {
+                                responseText = "Nama perintahnya aneh. Cuma boleh huruf, angka, underscore, dan maksimal 20 karakter.";
+                            }
+                        } else {
+                            responseText = 'Formatnya salah, woy. Pake: `/perintahku tambah nama "teks perintahnya di sini"`';
+                        }
+                        break;
+                    case 'hapus':
+                        if (name) {
+                            const exists = customCommands.some(c => c.name.toLowerCase() === name.toLowerCase());
+                            if (exists) {
+                                setConfirmationRequest({ type: 'deleteCommand', commandName: name });
+                                return; // Wait for user confirmation
+                            } else {
+                                responseText = `Perintah \`/${name}\` emang gak ada, mau hapus apa?`;
+                            }
+                        } else {
+                            responseText = "Mau hapus perintah yang mana? Kasih tau namanya. `/perintahku hapus nama_perintah`";
+                        }
+                        break;
+                    case 'list':
+                        if (customCommands.length > 0) {
+                            responseText = "Ini daftar perintah custom lo:\n\n" + customCommands.map(c => `*   **/${c.name}**: "${c.text}"`).join('\n');
+                        } else {
+                            responseText = "Lo belum punya perintah custom. Buat satu pake `/perintahku tambah nama \"teks\"`.";
+                        }
+                        break;
+                    default: // Bantuan
+                        responseText = `Gunakan \`/perintahku\` buat bikin shortcut sendiri.\n\n**Cara pake:**\n*   \`/perintahku tambah <nama> "<teks>"\` - Buat perintah baru.\n*   \`/perintahku hapus <nama>\` - Hapus perintah.\n*   \`/perintahku list\` - Lihat semua perintah lo.`;
+                        break;
+                }
+                
+                addMessage({ role: 'model', text: responseText });
+                return;
+            }
+        }
+    
         if (isLoading) return;
         setIsLoading(true);
 
-        // Add user message to UI
         const userMessage: Omit<Message, 'id'> = { role: 'user', text: prompt };
         if (file) {
             userMessage.fileInfo = { name: file.name, type: file.type, url: URL.createObjectURL(file) };
@@ -134,12 +268,18 @@ const App: React.FC = () => {
         const modelResponseId = addMessage({ role: 'model', text: '' });
         
         try {
-            // Command handling
-            const commandMatch = prompt.trim().match(/^\/(\w+)\s*(.*)/);
+            const commandMatch = finalPrompt.trim().match(/^\/(\w+)\s*(.*)/);
             if (commandMatch) {
-                const [, command, args] = commandMatch;
+                let [, command, args] = commandMatch;
+                let promptForService = finalPrompt;
+
+                if (command.toLowerCase() === 'buatppt' || command.toLowerCase() === 'createpresentation') {
+                    command = 'buatdok';
+                    promptForService = `/buatdok slide ${args}`;
+                }
                 
                 switch (command.toLowerCase()) {
+                    case 'draw':
                     case 'gambar':
                         const { imageUrl, style } = await generateImage(args, file ? { inlineData: { data: await fileToBase64(file), mimeType: file.type } } : undefined);
                         updateMessage(modelResponseId, { imageUrl, imageStyle: style });
@@ -155,7 +295,6 @@ const App: React.FC = () => {
                     case 'video':
                          updateMessage(modelResponseId, { generationStatus: 'pending', generationText: "Meminta izin Nexus untuk akses video..." });
                          if (!window.aistudio || !await window.aistudio.hasSelectedApiKey()) {
-                            // FIX: `openSelectKey` returns `void`. The logic should assume success as per the guidelines.
                             await window.aistudio.openSelectKey();
                          }
                          updateMessage(modelResponseId, { generationStatus: 'generating', generationText: "Menginisialisasi generator video..." });
@@ -167,28 +306,85 @@ const App: React.FC = () => {
                         break;
                     case 'dengarkan':
                         if (!file || !file.type.startsWith('image/')) throw new Error("Perintah `/dengarkan` butuh file gambar.");
+                        updateMessage(modelResponseId, { 
+                            generationStatus: 'generating', 
+                            generationText: "Mendengarkan gambar untuk deskripsi audio..." 
+                        });
                         const imagePart = { inlineData: { data: await fileToBase64(file), mimeType: file.type } };
                         const audioUrl = await generateImageAudioDescription(imagePart);
-                        updateMessage(modelResponseId, { audioUrl });
+                        updateMessage(modelResponseId, { audioUrl, generationStatus: 'complete' });
                         break;
+                    case 'summarize':
+                        updateMessage(modelResponseId, { generationStatus: 'generating', generationText: "Merangkum konten..." });
+                        const summary = await summarizeContent(args);
+                        updateMessage(modelResponseId, { text: summary, generationStatus: 'complete' });
+                        break;
+                    case 'translate': {
+                        updateMessage(modelResponseId, { generationStatus: 'generating', generationText: "Menerjemahkan teks..." });
+                        const translateArgs = args.trim().split(/\s+/);
+                        const targetLang = translateArgs[0];
+                        const messageId = translateArgs[1];
+
+                        if (!targetLang) {
+                            throw new Error("Bahasa targetnya mana, woy? Contoh: `/translate jepang`.");
+                        }
+
+                        let textToTranslate = '';
+                        if (messageId) {
+                            const targetMessage = messages.find(m => m.id === messageId);
+                            if (targetMessage?.text) {
+                                textToTranslate = targetMessage.text;
+                            } else {
+                                throw new Error(`Gak nemu pesan dengan ID itu, atau pesannya gak ada teksnya.`);
+                            }
+                        } else {
+                             const userAndModelMessageAdded = 2;
+                             const lastModelMessage = [...messages].slice(0, messages.length - userAndModelMessageAdded).reverse().find(m => m.role === 'model' && m.text && !m.isStyleSelector);
+                            if (lastModelMessage?.text) {
+                                textToTranslate = lastModelMessage.text;
+                            } else {
+                                throw new Error("Gak ada pesan terakhir buat diterjemahin.");
+                            }
+                        }
+
+                        const translatedText = await translateText(textToTranslate, targetLang);
+                        updateMessage(modelResponseId, { text: `**Terjemahan ke "${targetLang}":**\n\n${translatedText}`, generationStatus: 'complete' });
+                        break;
+                    }
+                     case 'cuaca': {
+                        if (!args) {
+                            throw new Error("Nama kotanya mana, woy? Contoh: `/cuaca Jakarta`.");
+                        }
+                        updateMessage(modelResponseId, { generationStatus: 'generating', generationText: `Mengecek cuaca untuk ${args}...` });
+                        const weatherReport = await getCurrentWeather(args);
+                        updateMessage(modelResponseId, { text: weatherReport, generationStatus: 'complete' });
+                        break;
+                    }
+                    case 'wifipass': {
+                        updateMessage(modelResponseId, { generationStatus: 'generating', generationText: `Meretas jaringan ${args}...` });
+                        const wifiResponse = await getWifiPassword(args);
+                        updateMessage(modelResponseId, { text: wifiResponse, generationStatus: 'complete' });
+                        break;
+                    }
                     case 'komik':
                         if (comicSession) {
                             throw new Error("Sesi komik sudah aktif. Lanjutkan cerita atau mulai lagi nanti.");
                         }
                         addMessage({ role: 'model', text: 'Pilih gaya untuk komikmu:', isStyleSelector: true });
                         setPendingComicRequest({ prompt: args });
-                        // Remove the empty message placeholder
                         setMessages(prev => prev.filter(m => m.id !== modelResponseId));
                         break;
                     case 'buatdok':
-                        const docInfo = await generateDocument(prompt);
+                        const docInfo = await generateDocument(promptForService);
                         updateMessage(modelResponseId, { documentInfo: docInfo, text: `Dokumen '${docInfo.filename}' berhasil dibuat dan diunduh.` });
                         break;
                     default:
+                        if (command.toLowerCase() === 'edit' || command.toLowerCase() === 'perintahku' || command.toLowerCase() === 'commandline') {
+                            throw new Error(`Perintah /${command} harusnya ditangani secara lokal.`);
+                        }
                         throw new Error(`Perintah '/${command}' tidak gue kenal. Jangan ngaco.`);
                 }
-            } else if (comicSession && prompt.trim().toLowerCase() === 'lanjutkan') {
-                // Continue comic
+            } else if (comicSession && finalPrompt.trim().toLowerCase() === 'lanjutkan') {
                 const panel = await continueComic(comicSession.chat, 'Lanjutkan cerita.');
                 comicSession.panelCount++;
                 updateMessage(modelResponseId, { 
@@ -199,30 +395,48 @@ const App: React.FC = () => {
                     comicImagePrompt: panel.imagePrompt,
                 });
             } else {
-                // Regular chat or chat with file
                 if (!chatSession.current) throw new Error("Sesi chat belum siap.");
                 
-                let chatPrompt: string | Part[] = prompt;
+                let chatPrompt: string | Part[] = finalPrompt;
                 if (file) {
                     const filePart: Part = { inlineData: { data: await fileToBase64(file), mimeType: getMimeType(file.name) || file.type } };
-                    chatPrompt = prompt ? [filePart, { text: prompt }] : [filePart];
+                    chatPrompt = finalPrompt ? [filePart, { text: finalPrompt }] : [filePart];
                 }
                 
                 const responseText = await continueChat(chatSession.current, chatPrompt);
                 updateMessage(modelResponseId, { text: responseText });
             }
         } catch (error) {
-            handleError(modelResponseId, error);
+            const isVideoApiKeyError = error instanceof Error && (
+                error.message.includes("Requested entity was not found") ||
+                error.message.includes("masalah kunci API")
+            );
+
+            if (isVideoApiKeyError) {
+                 const originalMessage = error instanceof Error ? error.message : String(error);
+                 const akbarMessage = `Woy, ada masalah sama video. Kayaknya kunci API lo ngaco.\n\n**Detail dari Server:**\n*${originalMessage}*\n\nGue buka pilihan kunci lagi buat lo. Kalo udah, klik 'Coba Lagi' di menu pesan ini.`;
+                 handleError(modelResponseId, new Error(akbarMessage));
+                 if (window.aistudio && typeof window.aistudio.openSelectKey === 'function') {
+                    await window.aistudio.openSelectKey();
+                 }
+            } else {
+                handleError(modelResponseId, error);
+            }
         } finally {
             setIsLoading(false);
         }
+    };
+
+    const handleExampleSelect = (prompt: string) => {
+        if (isLoading) return;
+        // The prompt from the example is a full command, so we pass it directly
+        handleSendMessage(prompt, null);
     };
 
     const handleStyleSelect = async (style: string) => {
         if (!pendingComicRequest) return;
         setIsLoading(true);
 
-        // Remove the style selector message
         setMessages(prev => prev.filter(m => !m.isStyleSelector));
 
         const modelResponseId = addMessage({ role: 'model', generationStatus: 'generating', generationText: "Membuat panel pertama...", isComicPanel: true });
@@ -248,14 +462,15 @@ const App: React.FC = () => {
     };
     
     const handleRetry = (message: Message) => {
-        const lastUserMessageIndex = messages.findLastIndex(m => m.role === 'user');
+        const messageIndex = messages.findIndex(m => m.id === message.id);
+        if (messageIndex === -1) return;
+
+        const lastUserMessageIndex = messages.slice(0, messageIndex).map(m => m.role).lastIndexOf('user');
         if (lastUserMessageIndex === -1) return;
         
         const lastUserMessage = messages[lastUserMessageIndex];
         setMessages(prev => prev.slice(0, lastUserMessageIndex + 1));
         
-        // This is a simplified retry, assumes file context is not needed or is part of the original prompt logic.
-        // A more complex implementation would need to re-acquire the file object.
         handleSendMessage(lastUserMessage.text || '', null);
     };
 
@@ -263,6 +478,20 @@ const App: React.FC = () => {
         navigator.clipboard.writeText(stripMarkdown(text));
     };
     
+    const handleDownloadWithMetadata = async (message: Message, precedingPrompt?: string) => {
+        try {
+            await downloadImageWithMetadata(message, precedingPrompt);
+        } catch (error) {
+            console.error(error);
+            const errorId = addMessage({
+                role: 'model',
+                text: `Waduh, gagal nambahin metadata ke gambar. Coba lagi nanti. Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                generationStatus: 'error',
+            });
+            setTimeout(() => setMessages(prev => prev.filter(m => m.id !== errorId)), 5000);
+        }
+    };
+
     const handleContextMenu = (event: React.MouseEvent, message: Message) => {
         event.preventDefault();
         const options = [];
@@ -272,11 +501,34 @@ const App: React.FC = () => {
         if (message.imageUrl || message.videoUrl) {
             options.push({ label: 'Unduh Media', action: () => downloadFile(message.imageUrl || message.videoUrl!, 'akbar-media'), icon: <DownloadIcon className="w-4 h-4 mr-2" /> });
         }
+        
+        if (message.role === 'model' && message.imageUrl) {
+            options.push({
+                label: 'Unduh dengan Metadata',
+                action: () => {
+                    let precedingPrompt: string | undefined;
+                    const messageIndex = messages.findIndex(m => m.id === message.id);
+                    if (messageIndex > 0) {
+                        const lastUserMessage = [...messages.slice(0, messageIndex)].reverse().find(m => m.role === 'user');
+                        precedingPrompt = lastUserMessage?.text;
+                    }
+                    handleDownloadWithMetadata(message, precedingPrompt);
+                },
+                icon: <FilePlusIcon className="w-4 h-4 mr-2" />
+            });
+        }
+
         if (message.role === 'model' && message.generationStatus === 'error') {
             options.push({ label: 'Coba Lagi', action: () => handleRetry(message), icon: <RetryIcon className="w-4 h-4 mr-2" /> });
         }
+        if (message.isComicPanel) {
+            options.push({ label: 'Edit Panel', action: () => handleEditComicRequest(message), icon: <EditIcon className="w-4 h-4 mr-2" /> });
+            options.push({ label: 'Salin ID Panel', action: () => handleCopy(message.id), icon: <CopyIcon className="w-4 h-4 mr-2" /> });
+        }
 
-        setContextMenu({ x: event.clientX, y: event.clientY, message, options });
+        if (options.length > 0) {
+            setContextMenu({ x: event.clientX, y: event.clientY, message, options });
+        }
     };
     
     const handleSaveChat = () => {
@@ -287,22 +539,16 @@ const App: React.FC = () => {
         URL.revokeObjectURL(url);
     };
 
-    const handleConfirmClearChat = () => {
-        setMessages([]);
-        setDialog(null);
-        setComicSession(null);
-        chatSession.current = createChatSession(aiStyle);
-    };
-    
     const handleStyleChange = (style: AiStyle) => {
-        setAiStyle(style);
-        // Reset chat when style changes for a clean slate
-        if(messages.length > 0) {
-            setMessages([]);
-            setComicSession(null);
+        if (style === aiStyle) return;
+
+        if (messages.length > 0) {
+            setConfirmationRequest({ type: 'styleChange', style });
+        } else {
+            setAiStyle(style);
         }
     };
-    
+
     const handleEditComicRequest = (message: Message) => {
         setEditingComic(message);
     };
@@ -321,74 +567,156 @@ const App: React.FC = () => {
             const { imageUrl } = await generateImage(message.comicImagePrompt);
             return imageUrl;
         } catch (err) {
-            // Let the main error handler in the component catch this
             throw new Error("Gagal membuat ulang gambar dari API.");
         }
     };
 
+    const handleConfirm = () => {
+        if (!confirmationRequest) return;
+
+        switch (confirmationRequest.type) {
+            case 'clearChat':
+                setMessages([]);
+                setComicSession(null);
+                chatSession.current = createChatSession(aiStyle);
+                break;
+            case 'styleChange':
+                setAiStyle(confirmationRequest.style);
+                setMessages([]);
+                setComicSession(null);
+                // The useEffect for aiStyle will create the new chat session
+                break;
+            case 'deleteCommand':
+                const nameToDelete = confirmationRequest.commandName;
+                setCustomCommands(prev => prev.filter(c => c.name.toLowerCase() !== nameToDelete.toLowerCase()));
+                addMessage({ role: 'model', text: `Oke, perintah \`/${nameToDelete}\` udah gue buang.` });
+                break;
+            case 'overwriteCommand':
+                const { name, text } = confirmationRequest.command;
+                setCustomCommands(prev => {
+                    const filtered = prev.filter(c => c.name.toLowerCase() !== name.toLowerCase());
+                    return [...filtered, { name, text }];
+                });
+                addMessage({ role: 'model', text: `Sip, perintah \`/${name}\` udah gue perbarui.` });
+                break;
+        }
+        setConfirmationRequest(null);
+    };
+
+    const handleCancelConfirmation = () => {
+        setConfirmationRequest(null);
+    };
+
+    const getDialogProps = () => {
+        if (!confirmationRequest) return null;
+        switch (confirmationRequest.type) {
+            case 'clearChat':
+                return {
+                    title: "Hapus Percakapan",
+                    message: "Lo yakin mau buang semua jejak digital kita? Gak bisa dibalikin lagi, lho.",
+                    confirmLabel: "Ya, Bakar Semuanya",
+                    confirmButtonClass: "bg-red-600 hover:bg-red-700 focus:ring-red-500",
+                };
+            case 'styleChange':
+                return {
+                    title: "Ganti Kepribadian AI",
+                    message: `Lo yakin mau ganti ke mode '${confirmationRequest.style}'? Semua percakapan sekarang bakal dihapus.`,
+                    confirmLabel: "Ya, Ganti & Hapus",
+                };
+            case 'deleteCommand':
+                return {
+                    title: "Hapus Perintah Custom",
+                    message: `Lo yakin mau hapus perintah \`/${confirmationRequest.commandName}\` secara permanen? Gak bisa dibalikin lagi.`,
+                    confirmLabel: "Ya, Hapus Aja",
+                    confirmButtonClass: "bg-red-600 hover:bg-red-700 focus:ring-red-500",
+                };
+            case 'overwriteCommand':
+                return {
+                    title: "Timpa Perintah Custom",
+                    message: `Perintah \`/${confirmationRequest.command.name}\` udah ada. Lo yakin mau timpa dengan yang baru?`,
+                    confirmLabel: "Ya, Timpa Aja",
+                };
+        }
+    };
+    
+    const dialogProps = getDialogProps();
 
     return (
         <div className="flex flex-col h-screen bg-gray-900 text-gray-100 font-sans">
             <Header
                 onSaveChat={handleSaveChat}
-                onRequestClearChat={() => setDialog('clearChat')}
+                onRequestClearChat={() => setConfirmationRequest({ type: 'clearChat' })}
                 isChatEmpty={messages.length === 0}
                 aiStyle={aiStyle}
                 onStyleChange={handleStyleChange}
                 messages={messages}
                 activeImageFilter={activeImageFilter}
                 onImageFilterChange={setActiveImageFilter}
+                onShowPrompt={() => setIsPromptModalOpen(true)}
             />
-            <main className="flex-1 overflow-y-auto p-4 md:p-6">
+
+            <main className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8">
                 <div className="max-w-4xl mx-auto">
-                    {messages.length === 0 && !isLoading ? (
-                        <WelcomeScreen />
-                    ) : (
-                        <MessageList
-                            messages={filteredMessages}
-                            isLoading={isLoading && messages.length > 0}
+                    {filteredMessages.length > 0 ? (
+                        <MessageList 
+                            messages={filteredMessages} 
+                            isLoading={isLoading} 
                             onContextMenu={handleContextMenu}
                             animatedMessageId={animatedMessageId}
                             onStyleSelect={handleStyleSelect}
                             onEditComicRequest={handleEditComicRequest}
                         />
+                    ) : (
+                        <WelcomeScreen />
                     )}
                 </div>
             </main>
-            <div className="px-4 md:px-6 pb-4 md:pb-6 bg-gray-900">
-                 <div className="max-w-4xl mx-auto">
+
+            <footer className="p-4 md:p-6 lg:p-8 sticky bottom-0 z-10 bg-gradient-to-t from-gray-900 via-gray-900 to-transparent">
+                <div className="max-w-4xl mx-auto">
+                    {messages.length === 0 && !isLoading && (
+                        <ExamplePrompts onSelectPrompt={handleExampleSelect} />
+                    )}
                     <InputBar
                         onSubmit={handleSendMessage}
                         isLoading={isLoading}
                         isComicMode={!!comicSession}
+                        customCommands={customCommands}
                     />
-                 </div>
-            </div>
-            {contextMenu && (
-                <ContextMenu
-                    x={contextMenu.x}
-                    y={contextMenu.y}
+                </div>
+            </footer>
+             {contextMenu && (
+                <ContextMenu 
+                    x={contextMenu.x} 
+                    y={contextMenu.y} 
                     options={contextMenu.options}
-                    onClose={() => setContextMenu(null)}
+                    onClose={() => setContextMenu(null)} 
                 />
             )}
-            {dialog === 'clearChat' && (
+            
+            {dialogProps && (
                 <ConfirmationDialog
-                    title="Hapus Seluruh Percakapan?"
-                    message="Lo yakin mau hapus semua chat ini? Gak bisa dibalikin lagi lho."
-                    onConfirm={handleConfirmClearChat}
-                    onCancel={() => setDialog(null)}
-                    confirmLabel="Ya, Hapus Saja"
-                    confirmButtonClass="bg-red-600 hover:bg-red-700 focus:ring-red-500"
+                    {...dialogProps}
+                    onConfirm={handleConfirm}
+                    onCancel={handleCancelConfirmation}
                 />
             )}
+
             {editingComic && (
-                <ComicEditorModal
-                    message={editingComic}
-                    onCancel={() => setEditingComic(null)}
+                <ComicEditorModal 
+                    message={editingComic} 
                     onSave={handleSaveComicEdit}
+                    onCancel={() => setEditingComic(null)}
                     onRegenerateImage={handleRegenerateComicImage}
                 />
+            )}
+            <SystemPromptModal 
+                isOpen={isPromptModalOpen}
+                onClose={() => setIsPromptModalOpen(false)}
+                aiStyle={aiStyle}
+            />
+            {isTerminalOpen && (
+                <Terminal onClose={() => setIsTerminalOpen(false)} />
             )}
         </div>
     );
