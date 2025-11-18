@@ -1,5 +1,3 @@
-
-
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { InputBar } from './components/InputBar';
 import { MessageList } from './components/MessageList';
@@ -70,6 +68,35 @@ type ConfirmationRequest =
   | { type: 'styleChange'; style: AiStyle }
   | { type: 'deleteCommand'; commandName: string }
   | { type: 'overwriteCommand'; command: { name: string; text: string } };
+
+const parseCommandArgs = (args: string) => {
+    let tempArgs = ` ${args} `; // Pad for easier regex
+    const flags: { [key: string]: string | boolean | string[] } = {};
+
+    const kvFlagRegex = /--([\w-]+)\s+("([^"]+)"|'([^']+)'|(\S+))/g;
+    tempArgs = tempArgs.replace(kvFlagRegex, (match, key, _fullValue, quotedVal1, quotedVal2, unquotedVal) => {
+        const lowerKey = key.toLowerCase();
+        const value = quotedVal1 || quotedVal2 || unquotedVal;
+
+        if (unquotedVal && value.includes(',')) {
+            flags[lowerKey] = value.split(',').map(s => s.trim());
+        } else {
+            flags[lowerKey] = value;
+        }
+        return ' '; 
+    });
+
+    const boolFlagRegex = /--([\w-]+)/g;
+    tempArgs = tempArgs.replace(boolFlagRegex, (match, key) => {
+        flags[key.toLowerCase()] = true;
+        return ' '; 
+    });
+
+    const cleanPrompt = tempArgs.trim();
+
+    return { cleanPrompt, flags };
+};
+
 
 const App: React.FC = () => {
     // State management
@@ -158,6 +185,139 @@ const App: React.FC = () => {
         updateMessage(id, { text: errorMessage, generationStatus: 'error' });
     };
 
+    // --- Command Handlers ---
+
+    const handleImageCommand = async (args: string, file: File | null, id: string) => {
+        updateMessage(id, { generationStatus: 'generating', generationText: "Membuat gambar...", generationType: 'comic' });
+        const { cleanPrompt, flags } = parseCommandArgs(args);
+        const imagePart = file ? { inlineData: { data: await fileToBase64(file), mimeType: file.type } } : undefined;
+        const { imageUrl, style } = await generateImage(cleanPrompt, flags, imagePart);
+        updateMessage(id, { imageUrl, imageStyle: style, generationStatus: 'complete' });
+    };
+
+    const handleWallpaperCommand = async (args: string, _file: File | null, id: string) => {
+        updateMessage(id, { generationStatus: 'generating', generationText: "Membuat wallpaper...", generationType: 'comic' });
+        const { cleanPrompt, flags } = parseCommandArgs(args);
+        const wallpaper = await generateWallpaper(cleanPrompt, flags);
+        updateMessage(id, { imageUrl: wallpaper.imageUrl, imageStyle: wallpaper.style, generationStatus: 'complete' });
+    };
+
+    const handlePlaceholderCommand = async (args: string, _file: File | null, id: string) => {
+        updateMessage(id, { generationStatus: 'generating', generationText: "Membuat placeholder...", generationType: 'comic' });
+        const { cleanPrompt, flags } = parseCommandArgs(args);
+        const placeholderUrl = await generatePlaceholderImage(cleanPrompt, flags);
+        updateMessage(id, { imageUrl: placeholderUrl, imageStyle: 'placeholder', generationStatus: 'complete' });
+    };
+
+    const handleVideoCommand = async (args: string, _file: File | null, id: string) => {
+        updateMessage(id, { generationStatus: 'pending', generationText: "Meminta izin Nexus...", generationType: 'video' });
+        if (!window.aistudio || !await window.aistudio.hasSelectedApiKey()) {
+           await window.aistudio.openSelectKey();
+        }
+        updateMessage(id, { generationStatus: 'generating', generationText: "Inisialisasi...", generationType: 'video' });
+        const { cleanPrompt, flags } = parseCommandArgs(args);
+        const operation = await startVideoGeneration(cleanPrompt, flags);
+        const finalVideoUrl = await pollVideoStatus(operation, async (statusText, progress, previewUrl) => {
+            updateMessage(id, { generationText: statusText, generationProgress: progress, videoUrl: previewUrl });
+        });
+        updateMessage(id, { videoUrl: finalVideoUrl, generationStatus: 'complete' });
+    };
+    
+    const handleAudioDescCommand = async (_args: string, file: File | null, id: string) => {
+        if (!file || !file.type.startsWith('image/')) throw new Error("Perintah `/dengarkan` butuh file gambar.");
+        updateMessage(id, { generationStatus: 'generating', generationText: "Mendengarkan...", generationType: 'audio' });
+        const imagePart = { inlineData: { data: await fileToBase64(file), mimeType: file.type } };
+        const audioUrl = await generateImageAudioDescription(imagePart);
+        updateMessage(id, { audioUrl, generationStatus: 'complete' });
+    };
+
+    const handleSummarizeCommand = async (args: string, _file: File | null, id: string) => {
+        updateMessage(id, { generationStatus: 'generating', generationText: "Merangkum konten..." });
+        const summary = await summarizeContent(args);
+        updateMessage(id, { text: summary, generationStatus: 'complete' });
+    };
+
+    const handleTranslateCommand = async (args: string, _file: File | null, id: string) => {
+        updateMessage(id, { generationStatus: 'generating', generationText: "Menerjemahkan teks..." });
+        const translateArgs = args.trim().split(/\s+/);
+        const targetLang = translateArgs[0];
+        const messageId = translateArgs[1];
+
+        if (!targetLang) throw new Error("Bahasa targetnya mana, woy? Contoh: `/translate jepang`.");
+
+        let textToTranslate = '';
+        if (messageId) {
+            const targetMessage = messages.find(m => m.id === messageId);
+            if (!targetMessage?.text) throw new Error(`Gak nemu pesan dengan ID itu, atau pesannya gak ada teksnya.`);
+            textToTranslate = targetMessage.text;
+        } else {
+            const lastModelMessage = [...messages].reverse().find(m => m.id !== id && m.role === 'model' && m.text && !m.isStyleSelector);
+            if (!lastModelMessage?.text) throw new Error("Gak ada pesan terakhir buat diterjemahin.");
+            textToTranslate = lastModelMessage.text;
+        }
+
+        const translatedText = await translateText(textToTranslate, targetLang);
+        updateMessage(id, { text: `**Terjemahan ke "${targetLang}":**\n\n${translatedText}`, generationStatus: 'complete' });
+    };
+
+    const handleWeatherCommand = async (args: string, _file: File | null, id: string) => {
+        if (!args) throw new Error("Nama kotanya mana, woy? Contoh: `/cuaca Jakarta`.");
+        updateMessage(id, { generationStatus: 'generating', generationText: `Mengecek cuaca untuk ${args}...` });
+        const weatherReport = await getCurrentWeather(args);
+        updateMessage(id, { text: weatherReport, generationStatus: 'complete' });
+    };
+
+    const handleWifiCommand = async (args: string, _file: File | null, id: string) => {
+        updateMessage(id, { generationStatus: 'generating', generationText: `Meretas jaringan ${args}...` });
+        const wifiResponse = await getWifiPassword(args);
+        updateMessage(id, { text: wifiResponse, generationStatus: 'complete' });
+    };
+
+    const handleComicCommand = (args: string, _file: File | null, id: string) => {
+        if (comicSession) {
+            throw new Error("Sesi komik sudah aktif. Lanjutkan cerita atau mulai lagi nanti.");
+        }
+        addMessage({ role: 'model', text: 'Pilih gaya untuk komikmu:', isStyleSelector: true });
+        setPendingComicRequest({ prompt: args });
+        setMessages(prev => prev.filter(m => m.id !== id));
+    };
+
+    const handleDocumentCommand = async (args: string, _file: File | null, id: string) => {
+        const [format, ...descriptionParts] = args.trim().split(/\s+/);
+        const description = descriptionParts.join(' ');
+        const docFormat = format.toLowerCase() as 'pdf' | 'slide' | 'sheet';
+
+        if (!['pdf', 'slide', 'sheet'].includes(docFormat)) {
+            throw new Error("Format dokumen tidak valid. Pilih dari: pdf, slide, sheet.");
+        }
+
+        updateMessage(id, { generationStatus: 'generating', generationText: `Membuat ${docFormat}...`, generationType: docFormat });
+        
+        const onProgress = (statusText: string, progress?: number) => {
+            updateMessage(id, { generationText: statusText, generationProgress: progress });
+        };
+
+        const docInfo = await generateDocument(description, docFormat, onProgress);
+        updateMessage(id, { documentInfo: docInfo, text: `Dokumen '${docInfo.filename}' berhasil dibuat dan diunduh.`, generationStatus: 'complete' });
+    };
+    
+    const commandHandlers: Record<string, (args: string, file: File | null, id: string) => void> = {
+        'gambar': handleImageCommand,
+        'draw': handleImageCommand,
+        'wallpaper': handleWallpaperCommand,
+        'placeholder': handlePlaceholderCommand,
+        'video': handleVideoCommand,
+        'dengarkan': handleAudioDescCommand,
+        'summarize': handleSummarizeCommand,
+        'translate': handleTranslateCommand,
+        'cuaca': handleWeatherCommand,
+        'wifipass': handleWifiCommand,
+        'komik': handleComicCommand,
+        'buatdok': handleDocumentCommand,
+        'buatppt': (args, file, id) => handleDocumentCommand(`slide ${args}`, file, id),
+        'createpresentation': (args, file, id) => handleDocumentCommand(`slide ${args}`, file, id),
+    };
+
     const handleSendMessage = async (prompt: string, file: File | null) => {
         let finalPrompt = prompt;
         const commandMatchSimple = finalPrompt.trim().match(/^\/(\w+)/);
@@ -168,54 +328,48 @@ const App: React.FC = () => {
             }
         }
 
-        // Handle client-side commands that don't need an AI roundtrip
+        // --- Handle client-side commands that don't need an AI roundtrip ---
         if (commandMatchSimple) {
             const [, command, args] = prompt.trim().match(/^\/(\w+)\s*(.*)/) || [];
+            const cmdLower = command.toLowerCase();
 
-             if (command.toLowerCase() === 'commandline') {
+            if (cmdLower === 'commandline') {
                 setIsTerminalOpen(true);
                 return;
             }
             
-            if (command.toLowerCase() === 'edit') {
-                let panelToEdit: Message | undefined;
-                if (args) {
-                    panelToEdit = messages.find(m => m.id === args.trim() && m.isComicPanel);
-                } else {
-                    panelToEdit = [...messages].reverse().find(m => m.isComicPanel);
-                }
+            if (cmdLower === 'edit') {
+                const targetId = args.trim();
+                const panelToEdit = targetId 
+                    ? messages.find(m => m.id === targetId && m.isComicPanel)
+                    : [...messages].reverse().find(m => m.isComicPanel);
 
                 if (panelToEdit) {
                     handleEditComicRequest(panelToEdit);
                 } else {
-                    const errorText = args
-                        ? `Panel komik dengan ID itu gak ada, woy.`
-                        : `Gak ada panel komik terakhir buat diedit.`;
+                    const errorText = targetId ? `Panel komik dengan ID itu gak ada, woy.` : `Gak ada panel komik terakhir buat diedit.`;
                     const errorId = addMessage({ role: 'model', text: errorText, generationStatus: 'error' });
                     setTimeout(() => setMessages(prev => prev.filter(m => m.id !== errorId)), 4000);
                 }
                 return; 
             }
 
-            if (command.toLowerCase() === 'perintahku') {
-                const subCommandArgs = args.trim().split(/\s+/);
-                const subCommand = subCommandArgs[0]?.toLowerCase();
-                const name = subCommandArgs[1];
+            if (cmdLower === 'perintahku') {
+                const [subCommand, name, ...textParts] = args.trim().split(/\s+/);
                 const textMatch = args.match(/"(.*?)"/);
                 const text = textMatch ? textMatch[1] : '';
 
                 addMessage({ role: 'user', text: prompt }); 
-                
                 let responseText = '';
 
-                switch (subCommand) {
+                switch (subCommand?.toLowerCase()) {
                     case 'tambah':
                         if (name && text) {
                             if (/^[a-zA-Z0-9_]+$/.test(name) && name.length <= 20) {
-                                const existingCommand = customCommands.find(c => c.name.toLowerCase() === name.toLowerCase());
-                                if (existingCommand) {
+                                const existing = customCommands.find(c => c.name.toLowerCase() === name.toLowerCase());
+                                if (existing) {
                                     setConfirmationRequest({ type: 'overwriteCommand', command: { name, text } });
-                                    return; // Wait for user confirmation
+                                    return;
                                 }
                                 setCustomCommands(prev => [...prev, { name, text }]);
                                 responseText = `Sip, perintah \`/${name}\` udah gue simpen.`;
@@ -228,29 +382,24 @@ const App: React.FC = () => {
                         break;
                     case 'hapus':
                         if (name) {
-                            const exists = customCommands.some(c => c.name.toLowerCase() === name.toLowerCase());
-                            if (exists) {
+                            if (customCommands.some(c => c.name.toLowerCase() === name.toLowerCase())) {
                                 setConfirmationRequest({ type: 'deleteCommand', commandName: name });
-                                return; // Wait for user confirmation
-                            } else {
-                                responseText = `Perintah \`/${name}\` emang gak ada, mau hapus apa?`;
+                                return;
                             }
+                            responseText = `Perintah \`/${name}\` emang gak ada, mau hapus apa?`;
                         } else {
                             responseText = "Mau hapus perintah yang mana? Kasih tau namanya. `/perintahku hapus nama_perintah`";
                         }
                         break;
                     case 'list':
-                        if (customCommands.length > 0) {
-                            responseText = "Ini daftar perintah custom lo:\n\n" + customCommands.map(c => `*   **/${c.name}**: "${c.text}"`).join('\n');
-                        } else {
-                            responseText = "Lo belum punya perintah custom. Buat satu pake `/perintahku tambah nama \"teks\"`.";
-                        }
+                        responseText = customCommands.length > 0
+                            ? "Ini daftar perintah custom lo:\n\n" + customCommands.map(c => `*   **/${c.name}**: "${c.text}"`).join('\n')
+                            : "Lo belum punya perintah custom. Buat satu pake `/perintahku tambah nama \"teks\"`.";
                         break;
-                    default: // Bantuan
+                    default:
                         responseText = `Gunakan \`/perintahku\` buat bikin shortcut sendiri.\n\n**Cara pake:**\n*   \`/perintahku tambah <nama> "<teks>"\` - Buat perintah baru.\n*   \`/perintahku hapus <nama>\` - Hapus perintah.\n*   \`/perintahku list\` - Lihat semua perintah lo.`;
                         break;
                 }
-                
                 addMessage({ role: 'model', text: responseText });
                 return;
             }
@@ -261,7 +410,13 @@ const App: React.FC = () => {
 
         const userMessage: Omit<Message, 'id'> = { role: 'user', text: prompt };
         if (file) {
-            userMessage.fileInfo = { name: file.name, type: file.type, url: URL.createObjectURL(file) };
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const imageUrl = e.target?.result as string;
+                // Find the user message that was just added and update it
+                setMessages(prev => prev.map(m => (m.role === 'user' && m.text === prompt && !m.imageUrl) ? { ...m, imageUrl } : m));
+            };
+            reader.readAsDataURL(file);
         }
         addMessage(userMessage);
 
@@ -270,147 +425,32 @@ const App: React.FC = () => {
         try {
             const commandMatch = finalPrompt.trim().match(/^\/(\w+)\s*(.*)/);
             if (commandMatch) {
-                let [, command, args] = commandMatch;
-                let promptForService = finalPrompt;
-
-                if (command.toLowerCase() === 'buatppt' || command.toLowerCase() === 'createpresentation') {
-                    command = 'buatdok';
-                    promptForService = `/buatdok slide ${args}`;
-                }
-                
-                switch (command.toLowerCase()) {
-                    case 'draw':
-                    case 'gambar':
-                        const { imageUrl, style } = await generateImage(args, file ? { inlineData: { data: await fileToBase64(file), mimeType: file.type } } : undefined);
-                        updateMessage(modelResponseId, { imageUrl, imageStyle: style });
-                        break;
-                    case 'wallpaper':
-                        const wallpaper = await generateWallpaper(args);
-                        updateMessage(modelResponseId, { imageUrl: wallpaper.imageUrl, imageStyle: wallpaper.style });
-                        break;
-                    case 'placeholder':
-                        const placeholderUrl = await generatePlaceholderImage(args);
-                        updateMessage(modelResponseId, { imageUrl: placeholderUrl, imageStyle: 'placeholder' });
-                        break;
-                    case 'video':
-                         updateMessage(modelResponseId, { generationStatus: 'pending', generationText: "Meminta izin Nexus untuk akses video..." });
-                         if (!window.aistudio || !await window.aistudio.hasSelectedApiKey()) {
-                            await window.aistudio.openSelectKey();
-                         }
-                         updateMessage(modelResponseId, { generationStatus: 'generating', generationText: "Menginisialisasi generator video..." });
-                         const operation = await startVideoGeneration(args);
-                         const finalVideoUrl = await pollVideoStatus(operation, async (statusText, previewUrl) => {
-                             updateMessage(modelResponseId, { generationText: statusText, videoUrl: previewUrl });
-                         });
-                         updateMessage(modelResponseId, { videoUrl: finalVideoUrl, generationStatus: 'complete' });
-                        break;
-                    case 'dengarkan':
-                        if (!file || !file.type.startsWith('image/')) throw new Error("Perintah `/dengarkan` butuh file gambar.");
-                        updateMessage(modelResponseId, { 
-                            generationStatus: 'generating', 
-                            generationText: "Mendengarkan gambar untuk deskripsi audio..." 
-                        });
-                        const imagePart = { inlineData: { data: await fileToBase64(file), mimeType: file.type } };
-                        const audioUrl = await generateImageAudioDescription(imagePart);
-                        updateMessage(modelResponseId, { audioUrl, generationStatus: 'complete' });
-                        break;
-                    case 'summarize':
-                        updateMessage(modelResponseId, { generationStatus: 'generating', generationText: "Merangkum konten..." });
-                        const summary = await summarizeContent(args);
-                        updateMessage(modelResponseId, { text: summary, generationStatus: 'complete' });
-                        break;
-                    case 'translate': {
-                        updateMessage(modelResponseId, { generationStatus: 'generating', generationText: "Menerjemahkan teks..." });
-                        const translateArgs = args.trim().split(/\s+/);
-                        const targetLang = translateArgs[0];
-                        const messageId = translateArgs[1];
-
-                        if (!targetLang) {
-                            throw new Error("Bahasa targetnya mana, woy? Contoh: `/translate jepang`.");
-                        }
-
-                        let textToTranslate = '';
-                        if (messageId) {
-                            const targetMessage = messages.find(m => m.id === messageId);
-                            if (targetMessage?.text) {
-                                textToTranslate = targetMessage.text;
-                            } else {
-                                throw new Error(`Gak nemu pesan dengan ID itu, atau pesannya gak ada teksnya.`);
-                            }
-                        } else {
-                             const userAndModelMessageAdded = 2;
-                             const lastModelMessage = [...messages].slice(0, messages.length - userAndModelMessageAdded).reverse().find(m => m.role === 'model' && m.text && !m.isStyleSelector);
-                            if (lastModelMessage?.text) {
-                                textToTranslate = lastModelMessage.text;
-                            } else {
-                                throw new Error("Gak ada pesan terakhir buat diterjemahin.");
-                            }
-                        }
-
-                        const translatedText = await translateText(textToTranslate, targetLang);
-                        updateMessage(modelResponseId, { text: `**Terjemahan ke "${targetLang}":**\n\n${translatedText}`, generationStatus: 'complete' });
-                        break;
-                    }
-                     case 'cuaca': {
-                        if (!args) {
-                            throw new Error("Nama kotanya mana, woy? Contoh: `/cuaca Jakarta`.");
-                        }
-                        updateMessage(modelResponseId, { generationStatus: 'generating', generationText: `Mengecek cuaca untuk ${args}...` });
-                        const weatherReport = await getCurrentWeather(args);
-                        updateMessage(modelResponseId, { text: weatherReport, generationStatus: 'complete' });
-                        break;
-                    }
-                    case 'wifipass': {
-                        updateMessage(modelResponseId, { generationStatus: 'generating', generationText: `Meretas jaringan ${args}...` });
-                        const wifiResponse = await getWifiPassword(args);
-                        updateMessage(modelResponseId, { text: wifiResponse, generationStatus: 'complete' });
-                        break;
-                    }
-                    case 'komik':
-                        if (comicSession) {
-                            throw new Error("Sesi komik sudah aktif. Lanjutkan cerita atau mulai lagi nanti.");
-                        }
-                        addMessage({ role: 'model', text: 'Pilih gaya untuk komikmu:', isStyleSelector: true });
-                        setPendingComicRequest({ prompt: args });
-                        setMessages(prev => prev.filter(m => m.id !== modelResponseId));
-                        break;
-                    case 'buatdok':
-                        const docInfo = await generateDocument(promptForService);
-                        updateMessage(modelResponseId, { documentInfo: docInfo, text: `Dokumen '${docInfo.filename}' berhasil dibuat dan diunduh.` });
-                        break;
-                    default:
-                        if (command.toLowerCase() === 'edit' || command.toLowerCase() === 'perintahku' || command.toLowerCase() === 'commandline') {
-                            throw new Error(`Perintah /${command} harusnya ditangani secara lokal.`);
-                        }
-                        throw new Error(`Perintah '/${command}' tidak gue kenal. Jangan ngaco.`);
+                const [, command, args] = commandMatch;
+                const handler = commandHandlers[command.toLowerCase()];
+                if (handler) {
+                    await handler(args, file, modelResponseId);
+                } else {
+                    throw new Error(`Perintah '/${command}' tidak gue kenal. Jangan ngaco.`);
                 }
             } else if (comicSession && finalPrompt.trim().toLowerCase() === 'lanjutkan') {
+                 updateMessage(modelResponseId, { generationStatus: 'generating', generationText: `Membuat panel #${comicSession.panelCount + 1}...`, generationType: 'comic' });
                 const panel = await continueComic(comicSession.chat, 'Lanjutkan cerita.');
                 comicSession.panelCount++;
-                updateMessage(modelResponseId, { 
-                    isComicPanel: true, 
-                    imageUrl: panel.imageUrl, 
-                    text: panel.narrative,
-                    panelNumber: comicSession.panelCount,
-                    comicImagePrompt: panel.imagePrompt,
-                });
+                updateMessage(modelResponseId, { isComicPanel: true, imageUrl: panel.imageUrl, text: panel.narrative, panelNumber: comicSession.panelCount, comicImagePrompt: panel.imagePrompt, generationStatus: 'complete' });
             } else {
                 if (!chatSession.current) throw new Error("Sesi chat belum siap.");
-                
                 let chatPrompt: string | Part[] = finalPrompt;
                 if (file) {
                     const filePart: Part = { inlineData: { data: await fileToBase64(file), mimeType: getMimeType(file.name) || file.type } };
                     chatPrompt = finalPrompt ? [filePart, { text: finalPrompt }] : [filePart];
                 }
-                
                 const responseText = await continueChat(chatSession.current, chatPrompt);
                 updateMessage(modelResponseId, { text: responseText });
             }
         } catch (error) {
-            const isVideoApiKeyError = error instanceof Error && (
-                error.message.includes("Requested entity was not found") ||
-                error.message.includes("masalah kunci API")
-            );
+            const commandMatch = finalPrompt.trim().match(/^\/(\w+)/);
+            const isVideoCommand = commandMatch && commandMatch[1].toLowerCase() === 'video';
+            const isVideoApiKeyError = isVideoCommand && error instanceof Error && (error.message.includes("Requested entity was not found") || error.message.includes("masalah kunci API"));
 
             if (isVideoApiKeyError) {
                  const originalMessage = error instanceof Error ? error.message : String(error);
@@ -419,6 +459,10 @@ const App: React.FC = () => {
                  if (window.aistudio && typeof window.aistudio.openSelectKey === 'function') {
                     await window.aistudio.openSelectKey();
                  }
+            } else if (isVideoCommand && error instanceof Error) {
+                const originalMessage = error.message;
+                const akbarMessage = `Waduh, gagal bikin video. Ada masalah pas gue lagi kerja.\n\n**Detail dari Server:**\n*${originalMessage}*\n\nCoba cek lagi perintah lo, pastiin gak aneh-aneh. Kalau masih gagal, coba lagi nanti.`;
+                handleError(modelResponseId, new Error(akbarMessage));
             } else {
                 handleError(modelResponseId, error);
             }
@@ -439,20 +483,13 @@ const App: React.FC = () => {
 
         setMessages(prev => prev.filter(m => !m.isStyleSelector));
 
-        const modelResponseId = addMessage({ role: 'model', generationStatus: 'generating', generationText: "Membuat panel pertama...", isComicPanel: true });
+        const modelResponseId = addMessage({ role: 'model', generationStatus: 'generating', generationText: "Membuat panel pertama...", isComicPanel: true, generationType: 'comic' });
 
         try {
             const newChat = startComicSession(pendingComicRequest.prompt, style);
             const panel = await continueComic(newChat, pendingComicRequest.prompt);
             setComicSession({ chat: newChat, panelCount: 1, style: style });
-            updateMessage(modelResponseId, {
-                isComicPanel: true,
-                imageUrl: panel.imageUrl,
-                text: panel.narrative,
-                generationStatus: 'complete',
-                panelNumber: 1,
-                comicImagePrompt: panel.imagePrompt
-            });
+            updateMessage(modelResponseId, { isComicPanel: true, imageUrl: panel.imageUrl, text: panel.narrative, generationStatus: 'complete', panelNumber: 1, comicImagePrompt: panel.imagePrompt });
         } catch (error) {
             handleError(modelResponseId, error);
         } finally {
@@ -498,8 +535,11 @@ const App: React.FC = () => {
         if (message.text) {
             options.push({ label: 'Salin Teks', action: () => handleCopy(message.text!), icon: <CopyIcon className="w-4 h-4 mr-2" /> });
         }
-        if (message.imageUrl || message.videoUrl) {
-            options.push({ label: 'Unduh Media', action: () => downloadFile(message.imageUrl || message.videoUrl!, 'akbar-media'), icon: <DownloadIcon className="w-4 h-4 mr-2" /> });
+        
+        if (message.imageUrl || message.videoUrl || message.audioUrl || message.fileInfo) {
+             let urlToDownload = message.imageUrl || message.videoUrl || message.audioUrl || message.fileInfo?.url;
+             let filename = message.fileInfo?.name || 'akbar-media';
+             options.push({ label: 'Unduh Media', action: () => downloadFile(urlToDownload!, filename), icon: <DownloadIcon className="w-4 h-4 mr-2" /> });
         }
         
         if (message.role === 'model' && message.imageUrl) {
@@ -564,7 +604,7 @@ const App: React.FC = () => {
             throw new Error("Prompt gambar asli tidak ditemukan.");
         }
         try {
-            const { imageUrl } = await generateImage(message.comicImagePrompt);
+            const { imageUrl } = await generateImage(message.comicImagePrompt, {});
             return imageUrl;
         } catch (err) {
             throw new Error("Gagal membuat ulang gambar dari API.");

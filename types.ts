@@ -24,6 +24,8 @@ export interface Message {
   fileInfo?: FileInfo; // For any file attachment
   generationStatus?: 'pending' | 'generating' | 'complete' | 'error';
   generationText?: string; // To show progress updates
+  generationProgress?: number; // For video generation progress
+  generationType?: 'video' | 'audio' | 'pdf' | 'slide' | 'sheet' | 'comic'; // Type of generation for status indicator
   isComicPanel?: boolean; // New flag for comic panels
   panelNumber?: number; // The sequence number for a comic panel
   isStyleSelector?: boolean; // To render the style selection UI

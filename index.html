@@ -115,6 +115,14 @@
       .overflow-x-auto::-webkit-scrollbar-thumb:hover {
         background-color: #718096; /* gray-500 */
       }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      .animate-spin-slow {
+        animation: spin 1.5s linear infinite;
+      }
     </style>
   <script type="importmap">
 {

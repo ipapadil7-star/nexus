@@ -48,9 +48,9 @@ export const WelcomeScreen: React.FC = () => {
          <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700/50">
           <h3 className="font-semibold text-gray-200 flex items-center mb-2">
             <BrushIcon className="w-5 h-5 mr-2 text-pink-400"/>
-            Gambar (Imagen 2)
+            Mode Kreatif Gambar
           </h3>
-          <p className="text-sm">Gunakan <code className="bg-gray-700 rounded px-1.5 py-1 text-xs font-mono">/draw</code> untuk model canggih. Mendukung semua flag dari <code className="bg-gray-700 rounded px-1.5 py-1 text-xs font-mono">/gambar</code>.</p>
+          <p className="text-sm">Gunakan <code className="bg-gray-700 rounded px-1.5 py-1 text-xs font-mono">/draw</code> dengan flag <code className="bg-gray-700 rounded px-1.5 py-1 text-xs font-mono">--mode creative</code> untuk hasil yang lebih artistik dan imajinatif.</p>
         </div>
         <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700/50">
            <h3 className="font-semibold text-gray-200 flex items-center mb-2">
@@ -111,9 +111,9 @@ export const WelcomeScreen: React.FC = () => {
         <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700/50">
             <h3 className="font-semibold text-gray-200 flex items-center mb-2">
                 <WifiIcon className="w-5 h-5 mr-2 text-green-300"/>
-                Lihat Password WiFi
+                Manajemen WiFi
             </h3>
-            <p className="text-sm">Gunakan <code className="bg-gray-700 rounded px-1.5 py-1 text-xs font-mono">/wifipass &lt;nama_wifi&gt;</code> untuk menampilkan kata sandi yang tersimpan.</p>
+            <p className="text-sm">Gunakan <code className="bg-gray-700 rounded px-1.5 py-1 text-xs font-mono">/wifipass &lt;perintah&gt;</code>. Perintah: <code className="bg-gray-700 rounded px-1.5 py-1 text-xs font-mono">list</code>, <code className="bg-gray-700 rounded px-1.5 py-1 text-xs font-mono">connect</code>, <code className="bg-gray-700 rounded px-1.5 py-1 text-xs font-mono">speedtest</code>.</p>
         </div>
         <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700/50">
           <h3 className="font-semibold text-gray-200 flex items-center mb-2">
@@ -125,9 +125,9 @@ export const WelcomeScreen: React.FC = () => {
          <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700/50">
             <h3 className="font-semibold text-gray-200 flex items-center mb-2">
                 <FileSlideIcon className="w-5 h-5 mr-2 text-orange-400"/>
-                Buat Presentasi
+                Presentasi Cerdas
             </h3>
-            <p className="text-sm">Gunakan <code className="bg-gray-700 rounded px-1.5 py-1 text-xs font-mono">/createpresentation</code> dengan topik Anda untuk membuat file .pptx secara otomatis.</p>
+            <p className="text-sm">Gunakan <code className="bg-gray-700 rounded px-1.5 py-1 text-xs font-mono">/createpresentation</code> untuk membuat .pptx dengan gambar & video yang relevan secara otomatis.</p>
         </div>
          <div className="bg-gray-800/50 p-4 rounded-lg border border-gray-700/50">
           <h3 className="font-semibold text-gray-200 flex items-center mb-2">

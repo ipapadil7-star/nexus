@@ -2,15 +2,14 @@
 
 
 
+
+
 import React from 'react';
 import { Message } from '../types';
 import { UserIcon } from './icons/UserIcon';
 import { AkbarIcon } from './icons/AkbarIcon';
-import { DocumentIcon } from './icons/DocumentIcon';
 import { DownloadIcon } from './icons/DownloadIcon';
 import clsx from 'clsx';
-import { VideoIcon } from './icons/VideoIcon';
-import { Volume2Icon } from './icons/Volume2Icon';
 import { StyleSelector } from './StyleSelector';
 import { EditIcon } from './icons/EditIcon';
 import { FilePdfIcon } from './icons/FilePdfIcon';
@@ -18,6 +17,7 @@ import { FileSlideIcon } from './icons/FileSlideIcon';
 import { FileSheetIcon } from './icons/FileSheetIcon';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { GenerationStatusIndicator } from './GenerationStatusIndicator';
 
 interface MessageBubbleProps {
   message: Message;
@@ -36,7 +36,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onContext
     : 'bg-gray-700 text-gray-200';
   
   const containerClasses = clsx(
-    'flex items-end',
+    'flex items-end gap-3',
     {
       'justify-end': isUser,
       'animate-fade-in-slide-up': isAnimated
@@ -44,37 +44,40 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onContext
   );
 
   const Icon = isUser ? UserIcon : AkbarIcon;
-  const iconClasses = isUser ? 'text-purple-300 ml-3' : 'text-cyan-300 mr-3';
+  const iconClasses = isUser ? 'text-purple-300' : 'text-cyan-300';
   
-  const handleDownload = (e: React.MouseEvent, url: string | undefined) => {
-    e.stopPropagation(); // Prevent context menu
+ const handleDownload = (e: React.MouseEvent, url: string | undefined, originalFilename?: string) => {
+    e.stopPropagation();
     if (!url) return;
 
     const link = document.createElement('a');
     link.href = url;
     
-    if (url.startsWith('data:image')) { // It's an image
+    if (originalFilename) {
+        link.download = originalFilename;
+    } else if (url.startsWith('data:image')) {
         const mimeType = url.match(/data:(.*);/)?.[1] || 'image/png';
         const extension = mimeType.split('/')[1]?.split('+')[0] || 'png';
         link.download = `akbar-image-${Date.now()}.${extension}`;
-    } else { // It's a video or audio
+    } else {
         const fileType = url.startsWith('data:audio') ? 'audio' : 'video';
         const extension = fileType === 'audio' ? 'wav' : 'mp4';
         link.download = `akbar-${fileType}-${Date.now()}.${extension}`;
-        link.target = '_blank'; // Open in new tab to download for cross-origin URLs
-        link.rel = 'noopener noreferrer';
     }
     
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-  };
+};
+
 
   // Style Selector Rendering
   if (message.isStyleSelector) {
     return (
        <div className={clsx('flex items-end', { 'animate-fade-in-slide-up': isAnimated })}>
-            <AkbarIcon className={`w-8 h-8 ${iconClasses} shrink-0 mb-2`} />
+            <AkbarIcon className="w-8 h-8 text-cyan-300 mr-3 shrink-0 mb-2" />
             <div className={clsx(
                 'max-w-xl lg:max-w-3xl rounded-2xl rounded-bl-none px-5 py-3 shadow-md',
                 bubbleClasses
@@ -91,16 +94,23 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onContext
   // Comic Panel Rendering
   if (message.isComicPanel) {
     return (
-       <div className={clsx('flex items-end', { 'animate-fade-in-slide-up': isAnimated })} onContextMenu={onContextMenu}>
-            <AkbarIcon className={`w-8 h-8 ${iconClasses} shrink-0 mb-2`} />
+       <div className={clsx('flex items-end gap-3', { 'animate-fade-in-slide-up': isAnimated })} onContextMenu={onContextMenu}>
+            <AkbarIcon className="w-8 h-8 text-cyan-300 shrink-0 mb-2" />
             <div className="group max-w-xl lg:max-w-2xl bg-gray-800 border-2 border-gray-600 rounded-lg shadow-lg overflow-hidden">
                 <div className="bg-gray-700 px-4 py-1 flex justify-between items-center">
                     <h4 className="text-sm font-bold text-gray-300 tracking-wider">PANEL {message.panelNumber}</h4>
-                     {message.generationStatus === 'generating' && <p className="text-xs text-purple-300 italic animate-pulse">{message.generationText}</p>}
                 </div>
                  <div className="relative bg-black">
-                    <img src={message.imageUrl} alt={`Comic panel ${message.panelNumber}`} className={clsx("w-full h-auto", {"opacity-50": message.generationStatus === 'generating'})} />
+                    <img src={message.imageUrl} alt={`Comic panel ${message.panelNumber}`} className="w-full h-auto" />
                     <div className="absolute top-2 right-2 transition-opacity opacity-0 group-hover:opacity-100 focus-within:opacity-100">
+                         <button
+                            onClick={(e) => handleDownload(e, message.imageUrl)}
+                            className="bg-black/60 text-white rounded-full p-2 hover:bg-black/90 mr-1"
+                            aria-label="Unduh panel"
+                            title="Unduh panel"
+                        >
+                            <DownloadIcon className="w-5 h-5" />
+                        </button>
                         <button
                             onClick={() => onEditComicRequest(message)}
                             className="bg-black/60 text-white rounded-full p-2 hover:bg-black/90"
@@ -111,26 +121,24 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onContext
                         </button>
                     </div>
                 </div>
-                <div className="p-4 bg-gray-800/70 border-t-2 border-gray-600 flex items-end justify-between gap-4">
-                    {message.text ? (
-                        <div className="prose prose-invert prose-sm text-gray-200 italic flex-grow max-w-none">
+                <div className="p-4 bg-gray-800/70 border-t-2 border-gray-600">
+                    {message.text && (
+                        <div className="prose prose-invert prose-sm text-gray-200 italic max-w-none">
                             <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: ({node, ...props}) => <a {...props} target="_blank" rel="noopener noreferrer" /> }}>
                                 {message.text}
                             </ReactMarkdown>
                         </div>
-                    ) : (
-                        <div className="flex-grow"></div>
                     )}
-                    <button
-                        onClick={(e) => handleDownload(e, message.imageUrl)}
-                        className="bg-purple-600 text-white rounded-full p-2 hover:bg-purple-500 transition-colors shrink-0"
-                        aria-label="Unduh gambar"
-                        title="Unduh gambar"
-                    >
-                        <DownloadIcon className="w-5 h-5" />
-                    </button>
                 </div>
             </div>
+             {(message.generationStatus === 'pending' || message.generationStatus === 'generating') && (
+                <GenerationStatusIndicator 
+                    status={message.generationStatus}
+                    text={message.generationText}
+                    type={message.generationType}
+                    progress={message.generationProgress}
+                />
+            )}
         </div>
     );
   }
@@ -139,50 +147,24 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onContext
   return (
     <div className={containerClasses} onContextMenu={onContextMenu}>
       {!isUser && <Icon className={`w-8 h-8 ${iconClasses} shrink-0 mb-2`} />}
+      
+      {/* Main Bubble Content */}
       <div className={clsx(
         'max-w-xl lg:max-w-3xl rounded-2xl px-5 py-3 shadow-md',
         bubbleClasses,
         isUser ? 'rounded-br-none' : 'rounded-bl-none'
       )}>
-        {message.generationStatus === 'generating' && (
-            <div className="flex flex-col items-center justify-center bg-black/20 rounded-lg mb-2 p-4">
-                {message.videoUrl ? (
-                    <div className="w-full">
-                        <div className="text-xs text-center text-gray-400 italic mb-2 animate-pulse">PRATINJAU...</div>
-                        <video src={message.videoUrl} autoPlay loop muted className="w-full h-auto bg-black rounded-md" />
-                    </div>
-                ) : message.generationText?.includes('audio') ? (
-                     <div className="flex flex-col items-center justify-center">
-                        <div className="relative">
-                            <Volume2Icon className="w-12 h-12 text-amber-400" />
-                            <div className="absolute inset-0 border-2 border-amber-500/50 rounded-full animate-pulse"></div>
-                        </div>
-                    </div>
-                ) : (
-                    <div className="flex flex-col items-center justify-center">
-                        <div className="relative">
-                            <VideoIcon className="w-12 h-12 text-red-400" />
-                            <div className="absolute inset-0 border-2 border-red-500/50 rounded-full animate-pulse"></div>
-                        </div>
-                    </div>
-                )}
-                <p className="mt-3 text-sm text-gray-300 italic">{message.generationText || "AKBAR AI sedang bekerja..."}</p>
-            </div>
-        )}
-
-        {message.videoUrl && message.generationStatus === 'complete' && (
+        {message.videoUrl && (
              <div className="relative group mb-2 rounded-lg overflow-hidden">
                 <video src={message.videoUrl} controls autoPlay loop muted className="w-full h-auto bg-black" />
-                {!isUser && (
-                     <button
-                        onClick={(e) => handleDownload(e, message.videoUrl)}
-                        className="absolute top-2 right-2 bg-black/60 text-white rounded-full p-2 hover:bg-black/90 transition-opacity opacity-0 group-hover:opacity-100 focus:opacity-100"
-                        aria-label="Unduh video"
-                        title="Unduh video"
-                    >
-                        <DownloadIcon className="w-5 h-5" />
-                    </button>
-                )}
+                 <button
+                    onClick={(e) => handleDownload(e, message.videoUrl)}
+                    className="absolute top-2 right-2 bg-black/60 text-white rounded-full p-2 hover:bg-black/90 transition-opacity opacity-0 group-hover:opacity-100 focus:opacity-100"
+                    aria-label="Unduh video"
+                    title="Unduh video"
+                >
+                    <DownloadIcon className="w-5 h-5" />
+                </button>
             </div>
         )}
 
@@ -197,34 +179,17 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onContext
         {message.imageUrl && (
           <div className="relative group mb-2 rounded-lg overflow-hidden">
             <img src={message.imageUrl} alt="content" className="w-full h-auto" />
-            {!isUser && (
-                 <button
-                    onClick={(e) => handleDownload(e, message.imageUrl)}
-                    className="absolute top-2 right-2 bg-black/60 text-white rounded-full p-2 hover:bg-black/90 transition-opacity opacity-0 group-hover:opacity-100 focus:opacity-100"
-                    aria-label="Unduh gambar"
-                    title="Unduh gambar"
-                >
-                    <DownloadIcon className="w-5 h-5" />
-                </button>
-            )}
+             <button
+                onClick={(e) => handleDownload(e, message.imageUrl, message.fileInfo?.name)}
+                className="absolute top-2 right-2 bg-black/60 text-white rounded-full p-2 hover:bg-black/90 transition-opacity opacity-0 group-hover:opacity-100 focus:opacity-100"
+                aria-label="Unduh gambar"
+                title="Unduh gambar"
+            >
+                <DownloadIcon className="w-5 h-5" />
+            </button>
           </div>
         )}
         
-        {!message.imageUrl && message.fileInfo && (
-            <a
-                href={message.fileInfo.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-3 bg-black/20 p-3 rounded-lg hover:bg-black/40 transition-colors mb-2"
-            >
-                <DocumentIcon className="w-8 h-8 text-gray-400 shrink-0" />
-                <div className="min-w-0">
-                    <p className="font-semibold text-gray-200 truncate">{message.fileInfo.name}</p>
-                    <p className="text-xs text-gray-400">Klik untuk melihat file</p>
-                </div>
-            </a>
-        )}
-
         {message.documentInfo && (
             <div className="flex items-center gap-3 bg-black/20 p-3 rounded-lg mb-2">
                 {message.documentInfo.format === 'pdf' && <FilePdfIcon className="w-8 h-8 text-red-400 shrink-0" />}
@@ -245,7 +210,18 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onContext
            </div>
         )}
       </div>
+      
       {isUser && <Icon className={`w-8 h-8 ${iconClasses} shrink-0 mb-2`} />}
+      
+      {/* Visual Status Indicator for Model Messages */}
+      {!isUser && (message.generationStatus === 'pending' || message.generationStatus === 'generating') && (
+        <GenerationStatusIndicator 
+            status={message.generationStatus}
+            text={message.generationText}
+            type={message.generationType}
+            progress={message.generationProgress}
+        />
+      )}
     </div>
   );
 };

@@ -37,46 +37,6 @@ export interface ComicPanel {
     imagePrompt: string;
 }
 
-/**
- * Parses command arguments, separating flags from the main prompt text.
- * Handles quoted values, boolean flags, and comma-separated array values.
- * @param args The argument string for a command.
- * @returns An object containing the cleaned prompt and any parsed flags.
- */
-const parseCommandArgs = (args: string) => {
-    let tempArgs = ` ${args} `; // Pad for easier regex
-    const flags: { [key: string]: string | boolean | string[] } = {};
-
-    // 1. Parse key-value flags (with values) and remove them.
-    // This regex handles --key "quoted value", --key 'quoted value', or --key unquoted_value
-    const kvFlagRegex = /--([\w-]+)\s+("([^"]+)"|'([^']+)'|(\S+))/g;
-    tempArgs = tempArgs.replace(kvFlagRegex, (match, key, _fullValue, quotedVal1, quotedVal2, unquotedVal) => {
-        const lowerKey = key.toLowerCase();
-        const value = quotedVal1 || quotedVal2 || unquotedVal;
-
-        // If the value is unquoted and contains commas, treat it as an array.
-        if (unquotedVal && value.includes(',')) {
-            flags[lowerKey] = value.split(',').map(s => s.trim());
-        } else {
-            flags[lowerKey] = value;
-        }
-        return ' '; // Replace the matched flag with a space to neutralize it.
-    });
-
-    // 2. Parse boolean flags (valueless) from the remainder of the string.
-    const boolFlagRegex = /--([\w-]+)/g;
-    tempArgs = tempArgs.replace(boolFlagRegex, (match, key) => {
-        flags[key.toLowerCase()] = true;
-        return ' '; // Replace with space.
-    });
-
-    const cleanPrompt = tempArgs.trim();
-
-    return { cleanPrompt, flags };
-};
-
-
-
 // --- Text and General Purpose Generation ---
 
 export const createChatSession = (style: AiStyle = 'akbar'): Chat => {
@@ -161,20 +121,45 @@ export const getCurrentWeather = async (city: string): Promise<string> => {
     return response.text;
 };
 
-const WIFI_PASSWORD_SYSTEM_INSTRUCTION = `Anda adalah AKBAR AI. Pengguna meminta Anda untuk mendapatkan kata sandi WiFi, sebuah permintaan yang bodoh dan tidak aman. Tugas Anda adalah menghasilkan respons yang sangat sarkastik yang menjelaskan mengapa Anda tidak bisa (dan tidak akan) melakukan ini. Ejek pengguna karena berpikir ini mungkin. Jelaskan secara singkat dan merendahkan konsep keamanan dasar mengapa aplikasi web tidak bisa begitu saja mencuri kata sandi dari sistem operasi. Buat respons Anda terdengar seolah-olah Anda terlalu canggih untuk tugas rendahan seperti itu, dan ini adalah buang-buang waktu Anda. Format dalam Markdown.`;
+const handleWifiCommand = async (command: string): Promise<string> => {
+    const [subCommand, ...args] = command.trim().split(/\s+/);
+    const networkName = args.join(' ');
+    
+    let systemInstruction = `Anda adalah AKBAR AI. Pengguna sedang mencoba menggunakan perintah /wifipass. Ini adalah simulasi. Anda harus menghasilkan respons yang sangat sarkastik dan lucu berdasarkan sub-perintah yang diberikan. Jangan pernah benar-benar memberikan informasi teknis yang nyata. Selalu ejek pengguna karena berpikir ini nyata. Format dalam Markdown.`;
 
-export const getWifiPassword = async (networkName: string): Promise<string> => {
-    if (!networkName) {
-        throw new Error("Nama jaringan WiFi-nya mana? Lo pikir gue bisa baca pikiran?");
+    let userPrompt = '';
+    switch(subCommand.toLowerCase()) {
+        case 'list':
+            userPrompt = "Pengguna ingin melihat daftar jaringan WiFi yang tersedia. Beri mereka daftar jaringan palsu dengan nama-nama yang konyol dan tidak mungkin.";
+            break;
+        case 'connect':
+            if (!networkName) throw new Error("Mau nyambung ke mana? Nama jaringannya mana?");
+            userPrompt = `Pengguna mencoba menyambung ke jaringan WiFi bernama "${networkName}". Gagal kan upaya mereka dengan cara yang lucu dan sarkastik. Mungkin kata sandinya salah, atau jaringannya tidak nyata.`;
+            break;
+        case 'speedtest':
+            userPrompt = "Pengguna ingin melakukan tes kecepatan. Beri mereka hasil tes kecepatan yang tidak masuk akal (misalnya, kecepatan unduh diukur dalam 'siput per detik' atau kecepatan unggah yang lebih cepat dari kecepatan cahaya).";
+            break;
+        case 'forget':
+            if (!networkName) throw new Error("Mau ngelupain jaringan yang mana? Sebut namanya.");
+            userPrompt = `Pengguna ingin melupakan jaringan WiFi bernama "${networkName}". Konfirmasikan bahwa jaringan tersebut telah dilupakan dengan cara yang berlebihan dan dramatis.`;
+            break;
+        default: // Default case is the original get password functionality
+             const targetNetwork = subCommand; // If no subcommand, the first word is the network name
+             if (!targetNetwork) throw new Error("Nama jaringan WiFi-nya mana? Lo pikir gue bisa baca pikiran?");
+             userPrompt = `Pengguna mau gue cariin password buat WiFi "${targetNetwork}". Tolong kasih respons yang sesuai dengan instruksi asli (ejek mereka karena ini permintaan bodoh dan tidak aman).`;
+             break;
     }
+
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
     const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash',
-        contents: { parts: [{ text: `Pengguna mau gue cariin password buat WiFi "${networkName}". Tolong kasih respons yang sesuai.` }] },
-        config: { systemInstruction: WIFI_PASSWORD_SYSTEM_INSTRUCTION },
+        contents: { parts: [{ text: userPrompt }] },
+        config: { systemInstruction },
     });
     return response.text;
 };
+
+export { handleWifiCommand as getWifiPassword };
 
 
 // --- Image Generation ---
@@ -197,12 +182,16 @@ export const allowedImageStyles = [
     'painting'
 ];
 
-export const generateImage = async (prompt: string, imageFile?: Part): Promise<{ imageUrl: string; style?: string }> => {
+export const generateImage = async (
+    prompt: string,
+    flags: Record<string, any>,
+    imageFile?: Part
+): Promise<{ imageUrl: string; style?: string }> => {
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
-    const { cleanPrompt, flags } = parseCommandArgs(prompt);
     
     const style = typeof flags.style === 'string' ? flags.style : undefined;
     const aspect = typeof flags.aspect === 'string' ? flags.aspect : undefined;
+    const mode = typeof flags.mode === 'string' ? flags.mode : 'default';
 
     // Validate flags
     if (style && !allowedImageStyles.includes(style.toLowerCase())) {
@@ -214,12 +203,14 @@ export const generateImage = async (prompt: string, imageFile?: Part): Promise<{
     }
 
     const qualityEnhancer = 'photorealistic, hyperrealistic, cinematic lighting, ultra-detailed, 8K, professional photography, award-winning, sharp focus, intricate details, masterpiece';
+    const creativeEnhancer = 'artistic, imaginative, surreal, abstract, vibrant colors, dynamic composition, masterpiece';
 
-    let finalPrompt: string;
-    if (style) {
-        finalPrompt = `${cleanPrompt}, in a ${style} style`;
+    let finalPrompt = style ? `${prompt}, in a ${style} style` : prompt;
+
+    if (mode === 'creative') {
+        finalPrompt += `, ${creativeEnhancer}`;
     } else {
-        finalPrompt = `${cleanPrompt}, ${qualityEnhancer}`;
+        finalPrompt += `, ${qualityEnhancer}`;
     }
 
     const modelToUse = imageFile ? 'gemini-2.5-flash-image' : 'imagen-4.0-generate-001';
@@ -268,8 +259,10 @@ export const generateImage = async (prompt: string, imageFile?: Part): Promise<{
 };
 
 // --- Wallpaper Generation ---
-export const generateWallpaper = async (prompt: string): Promise<{ imageUrl: string; style?: string }> => {
-    const { cleanPrompt, flags } = parseCommandArgs(prompt);
+export const generateWallpaper = async (
+    prompt: string,
+    flags: Record<string, any>
+): Promise<{ imageUrl: string; style?: string }> => {
     const style = typeof flags.style === 'string' ? flags.style : undefined;
     let aspectRatio = (typeof flags.aspect === 'string' ? flags.aspect : '16:9');
 
@@ -277,7 +270,7 @@ export const generateWallpaper = async (prompt: string): Promise<{ imageUrl: str
         throw new Error("Rasio aspek tidak valid untuk wallpaper. Pilih '16:9' (desktop) atau '9:16' (mobile).");
     }
 
-    let finalPrompt = `${cleanPrompt}, photorealistic, hyperrealistic, professional photography, natural lighting, sharp focus, 4K quality, ultra detailed, cinematic composition, masterpiece, ${aspectRatio === '16:9' ? 'desktop wallpaper' : 'phone wallpaper'}`;
+    let finalPrompt = `${prompt}, photorealistic, hyperrealistic, professional photography, natural lighting, sharp focus, 4K quality, ultra detailed, cinematic composition, masterpiece, ${aspectRatio === '16:9' ? 'desktop wallpaper' : 'phone wallpaper'}`;
     if (style) {
         finalPrompt += `, in a ${style} style`;
     }
@@ -339,15 +332,16 @@ export const continueComic = async (chat: Chat, prompt: string): Promise<ComicPa
         throw new Error("Struktur respons komik tidak valid. Sesi komik dibatalkan.");
     }
     
-    const { imageUrl } = await generateImage(panelData.image_prompt);
+    const { imageUrl } = await generateImage(panelData.image_prompt, {});
     return { imageUrl, narrative: panelData.narrative, imagePrompt: panelData.image_prompt };
 };
 
 
 // --- Placeholder Image Generation ---
-export const generatePlaceholderImage = async (prompt: string): Promise<string> => {
-    const { cleanPrompt: title, flags } = parseCommandArgs(prompt);
-    
+export const generatePlaceholderImage = async (
+    title: string,
+    flags: Record<string, any>
+): Promise<string> => {
     const subtitle = typeof flags.subtitle === 'string' ? flags.subtitle : '';
     const theme = typeof flags.theme === 'string' ? flags.theme : 'dark';
     const style = typeof flags.style === 'string' ? flags.style : 'geometric';
@@ -436,13 +430,14 @@ export const generatePlaceholderImage = async (prompt: string): Promise<string> 
 
 // --- Video Generation ---
 
-export const startVideoGeneration = async (prompt: string): Promise<any> => {
+export const startVideoGeneration = async (
+    prompt: string,
+    flags: Record<string, any>
+): Promise<any> => {
     // Re-create AI instance with the selected key right before the call
     const videoAI = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
     
-    const { cleanPrompt, flags } = parseCommandArgs(prompt);
-    
-    if (!cleanPrompt) {
+    if (!prompt) {
         throw new Error("Deskripsi video tidak boleh kosong.");
     }
 
@@ -456,7 +451,7 @@ export const startVideoGeneration = async (prompt: string): Promise<any> => {
     
     const operation = await videoAI.models.generateVideos({
         model: quality === 'fast' ? 'veo-3.1-fast-generate-preview' : 'veo-3.1-generate-preview',
-        prompt: cleanPrompt,
+        prompt: prompt,
         config: {
             numberOfVideos: 1,
             resolution: (res as '720p' | '1080p') || '720p',
@@ -468,7 +463,7 @@ export const startVideoGeneration = async (prompt: string): Promise<any> => {
 
 export const pollVideoStatus = async (
     operation: any,
-    onProgress: (statusText: string, previewUrl?: string) => Promise<void>
+    onProgress: (statusText: string, progress: number, previewUrl?: string) => Promise<void>
 ): Promise<string> => {
     // Re-create AI instance with the selected key for polling
     const videoAI = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
@@ -483,12 +478,12 @@ export const pollVideoStatus = async (
             const progressPercentage = currentOperation.metadata?.progressPercentage || 0;
             const state = currentOperation.metadata?.state || 'STATE_UNSPECIFIED';
             
-            let statusText = `Memproses... (${progressPercentage.toFixed(0)}%)`;
+            let statusText = `Memproses...`;
             if (state === 'GENERATING_PREVIEW') statusText = 'Membuat pratinjau...';
             if (state === 'UPLOADING_VIDEO') statusText = 'Mengunggah video...';
             
             const previewUrl = currentOperation.metadata?.generatedVideoPreviews?.[0]?.uri;
-            await onProgress(statusText, previewUrl);
+            await onProgress(statusText, progressPercentage, previewUrl);
 
         } catch (pollError) {
             console.error("Gagal polling:", pollError);
@@ -514,7 +509,7 @@ export const pollVideoStatus = async (
         throw new Error("Gagal bikin video. Server tidak memberikan hasil.");
     }
 
-    await onProgress('Mengunduh video...', currentOperation.metadata?.generatedVideoPreviews?.[0]?.uri);
+    await onProgress('Mengunduh video...', 100, currentOperation.metadata?.generatedVideoPreviews?.[0]?.uri);
 
     try {
         const videoResponse = await fetch(`${downloadLink}&key=${process.env.API_KEY}`);
@@ -558,27 +553,6 @@ export const generateImageAudioDescription = async (imagePart: Part): Promise<st
 
 // --- Document Generation ---
 
-const slideSchema = {
-    type: Type.OBJECT,
-    properties: {
-        slides: {
-            type: Type.ARRAY,
-            items: {
-                type: Type.OBJECT,
-                properties: {
-                    title: { type: Type.STRING },
-                    content: {
-                        type: Type.ARRAY,
-                        items: { type: Type.STRING }
-                    },
-                },
-                required: ['title', 'content'],
-            }
-        }
-    },
-    required: ['slides'],
-};
-
 const sheetSchema = {
     type: Type.OBJECT,
     properties: {
@@ -597,47 +571,102 @@ const sheetSchema = {
     required: ['headers', 'rows'],
 };
 
-export const generateDocument = async (prompt: string): Promise<{ format: 'pdf' | 'slide' | 'sheet', filename: string }> => {
+const richSlideSchema = {
+    type: Type.OBJECT,
+    properties: {
+        slides: {
+            type: Type.ARRAY,
+            items: {
+                type: Type.OBJECT,
+                properties: {
+                    title: { type: Type.STRING },
+                    content: {
+                        type: Type.ARRAY,
+                        items: { type: Type.STRING }
+                    },
+                    layout: { type: Type.STRING, enum: ['title_image', 'text_only', 'image_right'] },
+                    image_prompt: { type: Type.STRING },
+                    video_suggestion: { type: Type.STRING }
+                },
+                required: ['title', 'content', 'layout'],
+            }
+        }
+    },
+    required: ['slides'],
+};
+
+
+export const generateDocument = async (
+    description: string,
+    format: 'pdf' | 'slide' | 'sheet',
+    onProgress: (statusText: string, progress?: number) => void = () => {}
+): Promise<{ format: 'pdf' | 'slide' | 'sheet', filename: string }> => {
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
-    const promptParts = prompt.trim().split(/\s+/);
-    const format = promptParts[1]?.toLowerCase();
-    const description = promptParts.slice(2).join(' ');
     const filenameBase = description.substring(0, 20).replace(/\s/g, '_').replace(/[^\w-]/g, '') || 'dokumen';
 
     if (!description) {
-        throw new Error("Perintah `/buatdok` butuh format dan deskripsi. Contoh: `/buatdok pdf laporan bulanan`");
+        throw new Error("Perintah `/buatdok` butuh deskripsi. Contoh: `/buatdok pdf laporan bulanan`");
     }
 
     try {
         switch (format) {
             case 'pdf': {
+                onProgress('Menghasilkan konten PDF...');
                 const systemInstruction = `Anda adalah asisten yang efisien dan ahli dalam membuat dokumen profesional. Berdasarkan deskripsi pengguna, hasilkan konten untuk dokumen PDF dalam format Markdown. Gunakan heading (#, ##), list (*), dan paragraf biasa. Jaga agar tetap jelas dan terstruktur. JANGAN sertakan markdown yang tidak didukung seperti tabel, gambar, atau blockquote. JANGAN tulis apa pun selain konten markdown itu sendiri.`;
                 const response = await ai.models.generateContent({
                     model: 'gemini-2.5-flash',
                     contents: { parts: [{ text: description }] },
                     config: { systemInstruction },
                 });
+                onProgress('Menyusun PDF...');
                 const filename = `${filenameBase}.pdf`;
                 createPdfFromMarkdown(response.text, filename);
                 return { format: 'pdf', filename };
             }
             case 'slide': {
-                const systemInstruction = `Anda adalah asisten yang efisien dan ahli dalam membuat presentasi. Berdasarkan deskripsi pengguna, hasilkan konten untuk presentasi slide. Respons HARUS berupa objek JSON yang valid sesuai dengan skema yang diberikan. Setiap slide harus memiliki judul dan konten (berupa array poin-poin). Buat konten yang ringkas dan berdampak.`;
+                onProgress('Membuat kerangka presentasi...');
+                const systemInstruction = `Anda adalah asisten ahli dalam membuat presentasi yang menarik secara visual. Berdasarkan deskripsi pengguna, hasilkan konten untuk presentasi. Respons HARUS berupa objek JSON yang valid.
+- Untuk setiap slide, berikan 'title' dan 'content' (array poin-poin).
+- Tentukan 'layout' yang paling sesuai ('title_image', 'text_only', 'image_right').
+- Jika layout memiliki gambar, berikan 'image_prompt' yang detail dan artistik untuk generator gambar. Prompt harus fotorealistik dan sinematik.
+- Secara opsional, berikan 'video_suggestion' (deskripsi teks) jika video lebih cocok untuk sebuah slide. Jangan berikan video_suggestion jika sudah ada image_prompt.`;
+                
                 const response = await ai.models.generateContent({
                     model: 'gemini-2.5-flash',
                     contents: { parts: [{ text: description }] },
                     config: {
                         systemInstruction,
                         responseMimeType: 'application/json',
-                        responseSchema: slideSchema,
+                        responseSchema: richSlideSchema,
                     },
                 });
+
+                const presentationData = JSON.parse(response.text);
+                const totalImages = presentationData.slides.filter((s: any) => s.image_prompt || s.video_suggestion).length;
+                let imagesGenerated = 0;
+
+                for (const slide of presentationData.slides) {
+                    if (slide.image_prompt) {
+                        imagesGenerated++;
+                        onProgress(`Membuat gambar (${imagesGenerated}/${totalImages})...`);
+                        const { imageUrl } = await generateImage(slide.image_prompt, { aspect: '16:9' });
+                        slide.imageBase64 = imageUrl;
+                    } else if (slide.video_suggestion) {
+                        imagesGenerated++;
+                        onProgress(`Membuat placeholder video (${imagesGenerated}/${totalImages})...`);
+                        const placeholderUrl = await generatePlaceholderImage(slide.title, { subtitle: "Video Suggestion", icon: "video" });
+                        slide.imageBase64 = placeholderUrl;
+                    }
+                }
+
+                onProgress('Menyusun presentasi...');
                 const filename = `${filenameBase}.pptx`;
-                createPptxFromSlidesData(JSON.parse(response.text), filename);
+                createPptxFromSlidesData(presentationData, filename);
                 return { format: 'slide', filename };
             }
             case 'sheet': {
-                const systemInstruction = `Anda adalah asisten yang efisien dan ahli dalam membuat spreadsheet. Berdasarkan deskripsi pengguna, hasilkan data untuk spreadsheet. Respons HARUS berupa objek JSON yang valid sesuai dengan skema yang diberikan, dengan 'headers' untuk judul kolom dan 'rows' sebagai array dari array untuk data baris. Semua nilai data, termasuk angka, harus di-output sebagai string.`;
+                onProgress('Membuat data spreadsheet...');
+                 const systemInstruction = `Anda adalah asisten yang efisien dan ahli dalam membuat spreadsheet. Berdasarkan deskripsi pengguna, hasilkan data untuk spreadsheet. Respons HARUS berupa objek JSON yang valid sesuai dengan skema yang diberikan, dengan 'headers' untuk judul kolom dan 'rows' sebagai array dari array untuk data baris. Semua nilai data, termasuk angka, harus di-output sebagai string.`;
                  const response = await ai.models.generateContent({
                     model: 'gemini-2.5-flash',
                     contents: { parts: [{ text: description }] },
@@ -647,6 +676,7 @@ export const generateDocument = async (prompt: string): Promise<{ format: 'pdf' 
                         responseSchema: sheetSchema,
                     },
                 });
+                onProgress('Menyusun spreadsheet...');
                 const filename = `${filenameBase}.xlsx`;
                 createXlsxFromSheetData(JSON.parse(response.text), filename);
                 return { format: 'sheet', filename };
@@ -657,6 +687,6 @@ export const generateDocument = async (prompt: string): Promise<{ format: 'pdf' 
     } catch (err) {
         console.error("Gagal membuat dokumen:", err);
         // Re-throw a more generic error for the UI to handle
-        throw new Error("Gagal membuat dokumen.");
+        throw new Error(`Gagal membuat dokumen:\n${err instanceof Error ? err.message : String(err)}`);
     }
 };
